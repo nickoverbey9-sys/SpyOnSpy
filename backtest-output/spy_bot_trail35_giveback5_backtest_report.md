@@ -1,6 +1,6 @@
-# SPY 0DTE Bot — Backtest ($1326.24) — data: thetadata
+# SPY 0DTE Bot — Backtest ($400.00) — data: thetadata
 
-Generated: 2026-06-17T06:54:01.979Z
+Generated: 2026-06-17T20:21:05.681Z
 
 > ✅ **Real market data (ThetaData).** Underlying: actual SPY 1m RTH bars. Options:
 > actual same-day 0DTE NBBO quotes — entries priced at the ASK, exits and stop/trail
@@ -13,17 +13,17 @@ Generated: 2026-06-17T06:54:01.979Z
 
 | Metric | Value |
 | --- | --- |
-| Start balance | $1326.24 |
-| End balance | $2539.24 |
-| Net P&L | $1213.00 |
-| Return | 91.46% |
-| Total trades | 23 |
-| Win rate | 60.9% (14W / 9L) |
-| Avg win | $104.64 |
-| Avg loss | $28.00 |
-| Profit factor | 5.81 |
-| Max drawdown | $88.00 |
-| Best / worst trade | $567.00 / $-88.00 |
+| Start balance | $400.00 |
+| End balance | $1208.00 |
+| Net P&L | $808.00 |
+| Return | 202.00% |
+| Total trades | 6 |
+| Win rate | 50.0% (3W / 3L) |
+| Avg win | $358.67 |
+| Avg loss | $89.33 |
+| Profit factor | 4.01 |
+| Max drawdown | $174.00 |
+| Best / worst trade | $954.00 / $-98.00 |
 
 ## Risk profile under test
 
@@ -41,36 +41,18 @@ Generated: 2026-06-17T06:54:01.979Z
 
 | Date | Regime | Trades | P&L |
 | --- | --- | --- | --- |
-| 2026-06-15 | real +0.37% | 4 | $625.00 |
-| 2026-06-16 | real -0.56% | 19 | $588.00 |
+| 2026-06-17 | real -1.38% | 6 | $808.00 |
 
 ## Trades
 
 | Date | Side | Strike | Qty | Entry | Exit | P&L | Reason |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-06-15 | Call | 754 | 4 | 1.12 | 1.07 | $-20.00 | Breakeven stop: premium 1.07 ≤ protected stop 1.12 (raised t |
-| 2026-06-15 | Call | 753 | 3 | 1.38 | 1.44 | $18.00 | Profit-lock stop: premium 1.44 ≤ locked stop 1.45 (raised to |
-| 2026-06-15 | Call | 753 | 3 | 1.35 | 3.24 | $567.00 | Trailing stop: premium 3.24 ≤ 15% give-back from peak 3.83 ( |
-| 2026-06-15 | Call | 755 | 4 | 0.50 | 0.65 | $60.00 | Trailing stop: premium 0.65 ≤ 15% give-back from peak 0.77 ( |
-| 2026-06-16 | Put | 754 | 4 | 1.00 | 1.80 | $320.00 | Trailing stop: premium 1.80 ≤ 15% give-back from peak 2.26 ( |
-| 2026-06-16 | Put | 753 | 4 | 1.17 | 1.23 | $24.00 | Profit-lock stop: premium 1.23 ≤ locked stop 1.23 (raised to |
-| 2026-06-16 | Put | 753 | 4 | 1.00 | 1.09 | $36.00 | Trailing stop: premium 1.09 ≤ 15% give-back from peak 1.29 ( |
-| 2026-06-16 | Put | 752 | 4 | 0.95 | 0.73 | $-88.00 | Stop loss: premium 0.73 ≤ stop 0.76 (20% loss) |
-| 2026-06-16 | Put | 752 | 4 | 0.79 | 1.00 | $84.00 | Trailing stop: premium 1.00 ≤ 15% give-back from peak 1.20 ( |
-| 2026-06-16 | Put | 753 | 4 | 0.71 | 0.69 | $-8.00 | Breakeven stop: premium 0.69 ≤ protected stop 0.71 (raised t |
-| 2026-06-16 | Put | 753 | 4 | 0.71 | 0.69 | $-8.00 | Profit-lock stop: premium 0.69 ≤ locked stop 0.75 (raised to |
-| 2026-06-16 | Put | 753 | 4 | 1.07 | 1.11 | $16.00 | Profit-lock stop: premium 1.11 ≤ locked stop 1.12 (raised to |
-| 2026-06-16 | Put | 752 | 4 | 0.66 | 0.63 | $-12.00 | Breakeven stop: premium 0.63 ≤ protected stop 0.66 (raised t |
-| 2026-06-16 | Put | 752 | 4 | 0.66 | 0.50 | $-64.00 | Stop loss: premium 0.50 ≤ stop 0.53 (20% loss) |
-| 2026-06-16 | Put | 752 | 4 | 0.56 | 0.69 | $52.00 | Trailing stop: premium 0.69 ≤ 15% give-back from peak 0.84 ( |
-| 2026-06-16 | Put | 752 | 4 | 0.67 | 0.65 | $-8.00 | Breakeven stop: premium 0.65 ≤ protected stop 0.67 (raised t |
-| 2026-06-16 | Put | 752 | 4 | 0.69 | 0.84 | $60.00 | Trailing stop: premium 0.84 ≤ 15% give-back from peak 1.04 ( |
-| 2026-06-16 | Put | 752 | 4 | 0.74 | 0.72 | $-8.00 | Profit-lock stop: premium 0.72 ≤ locked stop 0.78 (raised to |
-| 2026-06-16 | Put | 751 | 4 | 0.29 | 0.32 | $12.00 | Trailing stop: premium 0.32 ≤ 15% give-back from peak 0.42 ( |
-| 2026-06-16 | Put | 751 | 4 | 0.30 | 0.31 | $4.00 | Profit-lock stop: premium 0.31 ≤ locked stop 0.32 (raised to |
-| 2026-06-16 | Put | 751 | 4 | 0.39 | 0.86 | $188.00 | Trailing stop: premium 0.86 ≤ 15% give-back from peak 1.07 ( |
-| 2026-06-16 | Put | 751 | 4 | 0.49 | 0.55 | $24.00 | Hard flatten: past 14:30 CT cutoff |
-| 2026-06-16 | Put | 751 | 4 | 0.71 | 0.62 | $-36.00 | Hard flatten: past 14:30 CT cutoff |
+| 2026-06-17 | Put | 748 | 2 | 1.35 | 1.93 | $116.00 | Trailing stop: premium 1.93 ≤ 15% give-back from peak 2.30 ( |
+| 2026-06-17 | Put | 749 | 2 | 2.37 | 1.88 | $-98.00 | Stop loss: premium 1.88 ≤ stop 1.90 (20% loss) |
+| 2026-06-17 | Put | 750 | 1 | 2.26 | 2.32 | $6.00 | Profit-lock stop: premium 2.32 ≤ locked stop 2.37 (raised to |
+| 2026-06-17 | Put | 749 | 2 | 1.94 | 1.53 | $-82.00 | Stop loss: premium 1.53 ≤ stop 1.55 (20% loss) |
+| 2026-06-17 | Put | 748 | 3 | 1.00 | 4.18 | $954.00 | Trailing stop: premium 4.18 ≤ 15% give-back from peak 5.51 ( |
+| 2026-06-17 | Put | 747 | 1 | 2.59 | 1.71 | $-88.00 | Stop loss: premium 1.71 ≤ stop 2.07 (20% loss) |
 
 ## Rejection breakdown
 
@@ -78,25 +60,25 @@ Why each non-trade bar didn't fire (counts across all evaluated bars):
 
 | Bucket | Count |
 | --- | ---: |
-| bars_evaluated | 483 |
+| bars_evaluated | 288 |
 | no_chain_quoted | 0 |
-| daily_loss_stop | 23 |
-| no_setup | 39 |
-| blocked_mtf | 383 |
-| blocked_other | 15 |
+| daily_loss_stop | 103 |
+| no_setup | 27 |
+| blocked_mtf | 151 |
+| blocked_other | 0 |
 | review_mtf | 0 |
 | review_contract_quality | 0 |
 | review_aplus_floor | 0 |
 | review_no_contract | 0 |
 | review_other | 0 |
-| confidence_below_auto | 0 |
+| confidence_below_auto | 1 |
 | sizing_rejected | 0 |
 | cost_exceeds_balance | 0 |
 
 ### Top MTF block reasons
 
-- (87) Higher timeframe aligned with Call, but lower-timeframe confirmation incomplete (5m pending, 1m ok). Entry blocked until 5m setup + 1m trigger both confirm.
-- (86) Higher timeframe aligned with Put, but lower-timeframe confirmation incomplete (5m pending, 1m ok). Entry blocked until 5m setup + 1m trigger both confirm.
-- (64) Higher timeframe aligned with Call, but lower-timeframe confirmation incomplete (5m pending, 1m pending). Entry blocked until 5m setup + 1m trigger both confirm.
-- (63) Higher timeframe aligned with Put, but lower-timeframe confirmation incomplete (5m pending, 1m pending). Entry blocked until 5m setup + 1m trigger both confirm.
-- (21) Higher timeframe is neutral/choppy: Higher timeframe is mixed/neutral (30m neutral, 15m bearish). Entry blocked — small-account profile requires 30m + 15m trend alignment.
+- (113) Higher timeframe contradicts Put: 30m trend is bullish, opposing a Put entry. Entry blocked.
+- (20) Higher timeframe is neutral/choppy: Higher timeframe is mixed/neutral (30m neutral, 15m bearish). Entry blocked — small-account profile requires 30m + 15m trend alignment.
+- (8) Higher timeframe aligned with Put, but lower-timeframe confirmation incomplete (5m pending, 1m ok). Entry blocked until 5m setup + 1m trigger both confirm.
+- (8) Higher timeframe aligned with Put, but lower-timeframe confirmation incomplete (5m pending, 1m pending). Entry blocked until 5m setup + 1m trigger both confirm.
+- (1) Higher timeframe is neutral/choppy: Higher timeframe is mixed/neutral (30m neutral, 15m neutral). Entry blocked — small-account profile requires 30m + 15m trend alignment.

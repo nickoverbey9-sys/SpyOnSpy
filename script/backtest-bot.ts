@@ -171,10 +171,17 @@ async function loadRealSessions(n: number): Promise<Session[]> {
         "(listens on http://127.0.0.1:25503; override with THETA_TERMINAL_URL).",
     );
   }
+  // Explicit date override (BOT_BACKTEST_DATE=YYYY-MM-DD[,YYYY-MM-DD...]) lets
+  // us backtest a SPECIFIC session — including TODAY — which lastTradingSessions
+  // deliberately excludes (it only lists completed/finalized EOD sessions). When
+  // set, these exact dates are used in the given order, bypassing the calendar.
+  const dateOverride = process.env.BOT_BACKTEST_DATE?.trim();
   // Over-fetch the calendar so we can drop days whose options haven't yet
   // been finalized in ThetaData's pipeline (most recent session sometimes
   // returns 472 on quote queries for hours after the close).
-  const dates = await lastTradingSessions(n + 3);
+  const dates = dateOverride
+    ? dateOverride.split(",").map((d) => d.trim()).filter(Boolean)
+    : await lastTradingSessions(n + 3);
   if (!dates.length) throw new Error("ThetaData returned no completed trading sessions for SPY.");
   const sessions: Session[] = [];
   // Newest → oldest so we keep the freshest N that successfully load.
