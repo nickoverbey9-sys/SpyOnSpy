@@ -1,0 +1,35 @@
+{
+  "name": "SpyOnSpy 0DTE Dashboard",
+  "short_name": "SpyOnSpy",
+  "description": "A real-time SPY 0DTE trading cockpit with liquidity, macro, sentiment, and setup analysis.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080d14",
+  "theme_color": "#1fb6c6",
+  "orientation": "landscape-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open Liquidity Flow",
+      "short_name": "Liquidity",
+      "description": "Jump to liquidity-flow view.",
+      "url": "/#/liquidity",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Open Economic Calendar",
+      "short_name": "Calendar",
+      "description": "Jump to the economic-calendar view.",
+      "url": "/#/calendar",
+      "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}

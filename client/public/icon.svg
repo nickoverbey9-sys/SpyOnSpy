@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="SpyOnSpy icon">
+  <rect width="256" height="256" rx="56" fill="#080d14"/>
+  <rect x="38" y="38" width="180" height="180" rx="36" fill="none" stroke="#3ee8f7" stroke-width="14"/>
+  <path d="M70 158L103 98L132 158L171 96" fill="none" stroke="#3ee8f7" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M70 188H174" fill="none" stroke="#fbbf24" stroke-width="14" stroke-linecap="round"/>
+</svg>
