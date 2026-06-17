@@ -63,6 +63,7 @@ import {
   computeBotPnl,
   computeDailyScorecard,
   computeWeeklyScorecard,
+  computeSetupSourceScorecard,
   resetPaperState,
 } from "./paperState.js";
 
@@ -382,6 +383,22 @@ export function registerBotRoutes(app: Express, getSnapshot: SnapshotFn): void {
     });
   });
 
+  // ── GET /api/bot/scorecard/by-source ───────────────────────────────────────
+  // Read-only per-setup-source scorecard for the current trading day. Buckets
+  // today's closed trades by the setup that generated them (Pullback / VWAP /
+  // Generic continuation / Other-manual) and rolls up trades, win-rate, and net
+  // P&L per bucket. Never places an order or mutates bot state.
+  app.get("/api/bot/scorecard/by-source", (_req: Request, res: Response) => {
+    const cfg = getBotConfig();
+    const scorecard = computeSetupSourceScorecard();
+    res.json({
+      generatedAt: new Date().toISOString(),
+      mode: cfg.liveEnabled ? "LIVE" : "PAPER",
+      scorecard,
+      note: "Per-source scorecard is computed from locally tracked positions for the current trading day. Trades placed before source tagging shipped, and adopted broker positions, bucket as 'Other / manual'. Read-only. Not financial advice.",
+    });
+  });
+
   // ── GET /api/bot/signals ───────────────────────────────────────────────────
   app.get("/api/bot/signals", (_req: Request, res: Response) => {
     const snapshot = getSnapshot();
@@ -497,6 +514,7 @@ export function registerBotRoutes(app: Express, getSnapshot: SnapshotFn): void {
       breakevenArmFraction: cfg.breakevenArmFraction,
       profitLockArmFraction: cfg.profitLockArmFraction,
       profitLockProfitFraction: cfg.profitLockProfitFraction,
+      setupTitle: body.setupTitle,
     });
 
     res.json({
@@ -577,6 +595,7 @@ export function registerBotRoutes(app: Express, getSnapshot: SnapshotFn): void {
         breakevenArmFraction: cfg.breakevenArmFraction,
         profitLockArmFraction: cfg.profitLockArmFraction,
         profitLockProfitFraction: cfg.profitLockProfitFraction,
+        setupTitle: body.setupTitle,
       });
 
       res.json({

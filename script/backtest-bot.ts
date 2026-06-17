@@ -26,6 +26,10 @@
  * Run: npx tsx script/backtest-bot.ts
  */
 
+// MUST be first — sets BOT_PAPER_STATE_FILE=none (unless overridden) before
+// paperState.js is evaluated, so a backtest never clobbers the live paper
+// ledger at .data/bot-state.json.
+import "./backtest-env.js";
 import fs from "node:fs";
 import {
   terminalReachable,

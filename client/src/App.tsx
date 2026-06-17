@@ -1778,6 +1778,31 @@ function useBotScorecard() {
   });
 }
 
+type SetupSourceRow = {
+  source: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  scratches: number;
+  winRate: number;
+  netPnl: number;
+  openPositions: number;
+};
+
+type SetupSourceResponse = {
+  generatedAt: string;
+  mode: BotMode;
+  scorecard: { date: string; rows: SetupSourceRow[] };
+  note: string;
+};
+
+function useBotScorecardBySource() {
+  return useQuery<SetupSourceResponse>({
+    queryKey: ["/api/bot/scorecard/by-source"],
+    refetchInterval: 8_000,
+  });
+}
+
 type WeeklyDayRollup = {
   date: string;
   weekday: string;
@@ -2303,6 +2328,80 @@ function CloseTradeButton({
     >
       {pending ? "Closing…" : "Close trade"}
     </Button>
+  );
+}
+
+// ─── Setup-source scorecard ───────────────────────────────────────────────────
+
+function SetupSourceScorecard() {
+  const query = useBotScorecardBySource();
+  const rows = query.data?.scorecard.rows ?? [];
+
+  return (
+    <Card className="border-card-border bg-card/88" data-testid="panel-setup-source-scorecard">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <BarChart3 className="h-4 w-4 text-primary" />
+          Setup-source scorecard
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Today's paper/live performance by setup source. Read-only.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead className="border-b border-border text-xs uppercase tracking-[0.14em] text-muted-foreground">
+              <tr>
+                <th className="py-2 text-left font-medium">Source</th>
+                <th className="py-2 text-right font-medium">Trades</th>
+                <th className="py-2 text-right font-medium">W / L</th>
+                <th className="py-2 text-right font-medium">Win rate</th>
+                <th className="py-2 text-right font-medium">Net P&amp;L</th>
+                <th className="py-2 text-right font-medium">Open</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const decided = row.wins + row.losses;
+                return (
+                  <tr
+                    className="border-b border-border/60 last:border-0"
+                    data-testid={`row-source-${row.source}`}
+                    key={row.source}
+                  >
+                    <td className="py-2 pr-4 font-medium">{row.source}</td>
+                    <td className="py-2 text-right font-mono">{row.trades}</td>
+                    <td className="py-2 text-right font-mono">
+                      <span className="text-emerald-300">{row.wins}</span>
+                      {" / "}
+                      <span className="text-rose-300">{row.losses}</span>
+                    </td>
+                    <td className="py-2 text-right font-mono">
+                      {decided > 0 ? `${(row.winRate * 100).toFixed(0)}%` : "—"}
+                    </td>
+                    <td
+                      className={`py-2 text-right font-mono ${
+                        row.netPnl > 0
+                          ? "text-emerald-300"
+                          : row.netPnl < 0
+                            ? "text-rose-300"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {row.trades > 0 ? safeUsd(row.netPnl) : "—"}
+                    </td>
+                    <td className="py-2 text-right font-mono text-muted-foreground">
+                      {row.openPositions || "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -3184,6 +3283,9 @@ function BotControlPanel() {
 
       {/* ── Daily scorecard ───────────────────────────────────────────── */}
       <DailyScorecardPanel />
+
+      {/* ── Setup-source scorecard ────────────────────────────────────── */}
+      <SetupSourceScorecard />
 
       {/* ── Main grid ─────────────────────────────────────────────────── */}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.8fr)]">

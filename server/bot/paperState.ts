@@ -12,6 +12,40 @@ import fs from "node:fs";
 
 export type Side = "Call" | "Put";
 
+/**
+ * Canonical setup-source buckets for the per-source scorecard. The fixed order
+ * here is the display order the dashboard renders, and every bucket is always
+ * shown (even with zero trades), so SETUP_SOURCES is the single source of truth.
+ */
+export type SetupSource =
+  | "Pullback continuation"
+  | "VWAP reclaim/fade"
+  | "Generic continuation"
+  | "Other / manual";
+
+export const SETUP_SOURCES: readonly SetupSource[] = [
+  "Pullback continuation",
+  "VWAP reclaim/fade",
+  "Generic continuation",
+  "Other / manual",
+];
+
+/**
+ * Map a setup TITLE (e.g. "VWAP reclaim (2m) [vwap-reclaim]") to its canonical
+ * source bucket by keyword. Order matters: VWAP is checked before the generic
+ * "continuation" keyword so a "VWAP reclaim continuation" lands in VWAP, not
+ * Generic. A missing/empty title (manual orders, adopted broker positions)
+ * buckets as "Other / manual".
+ */
+export function classifySetupSource(title?: string | null): SetupSource {
+  const t = (title ?? "").toLowerCase();
+  if (!t) return "Other / manual";
+  if (t.includes("pullback")) return "Pullback continuation";
+  if (t.includes("vwap")) return "VWAP reclaim/fade";
+  if (t.includes("continuation")) return "Generic continuation";
+  return "Other / manual";
+}
+
 export interface PaperPosition {
   id: string;
   symbol: string;       // OCC-style option symbol
@@ -73,6 +107,13 @@ export interface PaperPosition {
   brokerDateAcquired?: string;
   /** Stable broker-identity key (symbol|dateAcquired) for adopted positions. */
   brokerKey?: string;
+  /**
+   * Canonical setup-source bucket the entry was classified into at open time
+   * (see classifySetupSource). Drives the per-source scorecard. Absent on
+   * positions opened before source tagging shipped and on adopted broker
+   * positions — both bucket as "Other / manual".
+   */
+  setupSource?: SetupSource;
   status: "open" | "closed";
   closeReason?: string;
   closePremium?: number;
@@ -274,6 +315,8 @@ export function openPaperPosition(params: {
   breakevenArmFraction?: number;
   profitLockArmFraction?: number;
   profitLockProfitFraction?: number;
+  /** Originating setup title; classified into a SetupSource bucket at open. */
+  setupTitle?: string;
 }): PaperPosition {
   maybeRollDay();
   const id = `paper-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -306,6 +349,7 @@ export function openPaperPosition(params: {
     profitLockStopPrice: profitLockArmFrac > 0 ? round(params.entryPremium * (1 + profitLockProfitFrac)) : 0,
     profitLockArmed: false,
     singleContract,
+    setupSource: classifySetupSource(params.setupTitle),
     status: "open",
   };
 
@@ -819,6 +863,86 @@ export function computeDailyScorecard(marks?: Map<string, number>): DailyScoreca
     exitReasons,
     sizingDistribution,
   };
+}
+
+/** Per-source performance row for the setup-source scorecard. */
+export interface SetupSourceRow {
+  source: SetupSource;
+  /** Closed trades opened today attributed to this source. */
+  trades: number;
+  wins: number;
+  losses: number;
+  scratches: number;
+  /** wins / (wins + losses), 0..1; 0 when no decided trades. */
+  winRate: number;
+  /** NET realized P&L (USD) over this source's closed trades today. */
+  netPnl: number;
+  /** Open positions (any entry date) attributed to this source. */
+  openPositions: number;
+}
+
+export interface SetupSourceScorecard {
+  date: string;
+  rows: SetupSourceRow[];
+}
+
+/**
+ * Per-setup-source daily scorecard. Buckets today's closed trades by the
+ * SetupSource recorded at entry and rolls up trades / win-rate / net P&L per
+ * bucket. Read-only; never contacts a broker. Every canonical bucket in
+ * SETUP_SOURCES is always present (zeroed when it had no activity) so the
+ * dashboard renders a stable set of rows. Positions with no recorded source
+ * (legacy or adopted) fall into "Other / manual" via classifySetupSource.
+ */
+export function computeSetupSourceScorecard(): SetupSourceScorecard {
+  maybeRollDay();
+  const today = todayStr();
+
+  const blank = (): Omit<SetupSourceRow, "source" | "winRate"> => ({
+    trades: 0,
+    wins: 0,
+    losses: 0,
+    scratches: 0,
+    netPnl: 0,
+    openPositions: 0,
+  });
+  const acc = new Map<SetupSource, ReturnType<typeof blank>>();
+  for (const s of SETUP_SOURCES) acc.set(s, blank());
+
+  for (const p of state.positions) {
+    if (p.entryAt.slice(0, 10) !== today) continue;
+    const source = p.setupSource ?? classifySetupSource(undefined);
+    const row = acc.get(source)!;
+
+    if (p.status === "open") {
+      row.openPositions += 1;
+      continue;
+    }
+    if (typeof p.pnl !== "number") continue;
+
+    row.trades += 1;
+    row.netPnl += p.pnl;
+    if (p.pnl > 0) row.wins += 1;
+    else if (p.pnl < 0) row.losses += 1;
+    else row.scratches += 1;
+  }
+
+  const rows: SetupSourceRow[] = SETUP_SOURCES.map((source) => {
+    const r = acc.get(source)!;
+    const decided = r.wins + r.losses;
+    return {
+      source,
+      trades: r.trades,
+      wins: r.wins,
+      losses: r.losses,
+      scratches: r.scratches,
+      winRate: decided > 0 ? round(r.wins / decided, 4) : 0,
+      netPnl: round(r.netPnl),
+      openPositions: r.openPositions,
+    };
+  });
+
+  return { date: today, rows };
 }
 
 // ─── Weekly scorecard ───────────────────────────────────────────────────────────

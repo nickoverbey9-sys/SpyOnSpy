@@ -1,6 +1,6 @@
 # SPY 0DTE Bot — Backtest ($400.00) — data: thetadata
 
-Generated: 2026-06-17T20:21:05.681Z
+Generated: 2026-06-17T20:41:40.354Z
 
 > ✅ **Real market data (ThetaData).** Underlying: actual SPY 1m RTH bars. Options:
 > actual same-day 0DTE NBBO quotes — entries priced at the ASK, exits and stop/trail

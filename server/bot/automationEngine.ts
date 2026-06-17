@@ -455,6 +455,7 @@ async function openOne(
       breakevenArmFraction: cfg.breakevenArmFraction,
       profitLockArmFraction: cfg.profitLockArmFraction,
       profitLockProfitFraction: cfg.profitLockProfitFraction,
+      setupTitle: sig.setup?.title,
     });
 
     entryCooldown.set(contract.symbol, now.getTime());

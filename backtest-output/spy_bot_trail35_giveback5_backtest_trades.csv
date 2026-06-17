@@ -1,7 +1,7 @@
 date,symbol,side,strike,contracts,entryAt,entryPremium,exitAt,exitPremium,pnl,balanceAfter,reason
-2026-06-17,SPY260617P00748000,Put,748,2,2026-06-17T20:21:04.686Z,1.35,2026-06-17T20:21:04.689Z,1.93,116,516,"Trailing stop: premium 1.93 ≤ 15% give-back from peak 2.30 (trail 1.95; armed at +25%)"
-2026-06-17,SPY260617P00749000,Put,749,2,2026-06-17T20:21:04.712Z,2.37,2026-06-17T20:21:04.738Z,1.88,-98,418,"Stop loss: premium 1.88 ≤ stop 1.90 (20% loss)"
-2026-06-17,SPY260617P00750000,Put,750,1,2026-06-17T20:21:05.043Z,2.26,2026-06-17T20:21:05.063Z,2.32,6,424,"Profit-lock stop: premium 2.32 ≤ locked stop 2.37 (raised to +5% profit after reaching +15% MFE)"
-2026-06-17,SPY260617P00749000,Put,749,2,2026-06-17T20:21:05.096Z,1.94,2026-06-17T20:21:05.123Z,1.53,-82,342,"Stop loss: premium 1.53 ≤ stop 1.55 (20% loss)"
-2026-06-17,SPY260617P00748000,Put,748,3,2026-06-17T20:21:05.145Z,1,2026-06-17T20:21:05.153Z,4.18,954,1296,"Trailing stop: premium 4.18 ≤ 15% give-back from peak 5.51 (trail 4.68; armed at +25%)"
-2026-06-17,SPY260617P00747000,Put,747,1,2026-06-17T20:21:05.676Z,2.59,2026-06-17T20:21:05.678Z,1.71,-88,1208,"Stop loss: premium 1.71 ≤ stop 2.07 (20% loss)"
+2026-06-17,SPY260617P00748000,Put,748,2,2026-06-17T20:41:39.296Z,1.35,2026-06-17T20:41:39.298Z,1.93,116,516,"Trailing stop: premium 1.93 ≤ 15% give-back from peak 2.30 (trail 1.95; armed at +25%)"
+2026-06-17,SPY260617P00749000,Put,749,2,2026-06-17T20:41:39.319Z,2.37,2026-06-17T20:41:39.321Z,1.88,-98,418,"Stop loss: premium 1.88 ≤ stop 1.90 (20% loss)"
+2026-06-17,SPY260617P00750000,Put,750,1,2026-06-17T20:41:39.751Z,2.26,2026-06-17T20:41:39.753Z,2.32,6,424,"Profit-lock stop: premium 2.32 ≤ locked stop 2.37 (raised to +5% profit after reaching +15% MFE)"
+2026-06-17,SPY260617P00749000,Put,749,2,2026-06-17T20:41:39.796Z,1.94,2026-06-17T20:41:39.800Z,1.53,-82,342,"Stop loss: premium 1.53 ≤ stop 1.55 (20% loss)"
+2026-06-17,SPY260617P00748000,Put,748,3,2026-06-17T20:41:39.831Z,1,2026-06-17T20:41:39.833Z,4.18,954,1296,"Trailing stop: premium 4.18 ≤ 15% give-back from peak 5.51 (trail 4.68; armed at +25%)"
+2026-06-17,SPY260617P00747000,Put,747,1,2026-06-17T20:41:40.350Z,2.59,2026-06-17T20:41:40.350Z,1.71,-88,1208,"Stop loss: premium 1.71 ≤ stop 2.07 (20% loss)"
