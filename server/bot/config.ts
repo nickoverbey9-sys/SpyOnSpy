@@ -804,6 +804,34 @@ export function etTimestamp(now = new Date()): string {
 }
 
 /**
+ * One-line, self-verifying snapshot of the ET clock derivation, logged once at
+ * engine/server start so a mis-zoned run is visible in the first log line.
+ *
+ * Every intraday gate derives ET via an explicit IANA America/New_York
+ * conversion that does NOT depend on the host's `TZ` env or system-local time —
+ * but a host built without full ICU (or a fixed-offset shim) could silently fall
+ * back to UTC. The embedded self-test maps a fixed instant (09:30:00 EDT) and
+ * asserts it yields 570 minutes; an "ICU/zone FAIL" here means the gates would
+ * mis-fire and must be investigated before trusting the session clock.
+ *
+ * `systemZone`/`tzEnv` are reported for context only — they must NOT change gate
+ * behavior, and the self-test proves they don't.
+ */
+export function etZoneDiagnostics(now = new Date()): string {
+  const systemZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "unknown";
+  const tzEnv = typeof process !== "undefined" ? process.env.TZ ?? "<unset>" : "<n/a>";
+  const probe = new Date("2026-06-22T13:30:00Z"); // 09:30:00 EDT (DST)
+  const probeMin = minutesIntoEtDay(probe);
+  const selfTest = probeMin === RTH_OPEN_ET_MIN
+    ? "OK"
+    : `FAIL(09:30 ET => ${probeMin} min, expected ${RTH_OPEN_ET_MIN} — ICU/zone data missing, gates will mis-fire)`;
+  return (
+    `ET clock: IANA America/New_York via Intl (DST-aware, TZ-env independent) | ` +
+    `host systemZone=${systemZone} TZ=${tzEnv} | self-test=${selfTest} | now=${etTimestamp(now)}`
+  );
+}
+
+/**
  * Open/close ENTRY-ONLY time guardrail. Returns a human-readable block reason
  * when `now` falls inside the first entryBlackoutOpenMin minutes after the
  * regular open or the last entryBlackoutCloseMin minutes before the regular

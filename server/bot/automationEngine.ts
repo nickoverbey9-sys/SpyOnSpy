@@ -34,6 +34,7 @@ import {
   getBotConfig,
   isNearHighImpactEvent,
   etTimestamp,
+  etZoneDiagnostics,
 } from "./config.js";
 import { isZeroDteSymbol } from "./occSymbol.js";
 import {
@@ -808,6 +809,9 @@ export function startAutomationEngine(getSnapshot: () => SnapshotForSignal): voi
       ? "Automation engine started — AUTONOMOUS LIVE trading ARMED"
       : "Automation engine started — observe-only (set TRADIER_AUTO_TRADE=true + live env to arm)",
     cfg.autoTradeEnabled && cfg.liveEnabled ? "LIVE" : "PAPER",
+    // Record the resolved ET clock source on the start event so a mis-zoned run
+    // is visible at a glance in the dashboard event log, not just stdout.
+    { etClock: etZoneDiagnostics() },
   );
 
   entryTimer = setInterval(() => void entryTick(), cfg.automationIntervalMs);

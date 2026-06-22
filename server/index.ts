@@ -4,6 +4,7 @@ import type { Request } from 'express';
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
+import { etZoneDiagnostics } from "./bot/config";
 
 const app = express();
 const httpServer = createServer(app);
@@ -25,14 +26,21 @@ app.use(
 app.use(express.urlencoded({ extended: false }));
 
 export function log(message: string, source = "express") {
+  // Pin the stdout prefix to Eastern time via an explicit IANA zone. Previously
+  // this used toLocaleTimeString() with NO timeZone, so the prefix rendered in
+  // the process's launch timezone — a local (CT) run and a UTC host (Render)
+  // stamped the SAME ET-correct events an hour+ apart, which read as an
+  // "intermittent" clock offset. ET is now the single, launch-context-invariant
+  // reference for every log line.
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
     hour12: true,
+    timeZone: "America/New_York",
   });
 
-  console.log(`${formattedTime} [${source}] ${message}`);
+  console.log(`${formattedTime} ET [${source}] ${message}`);
 }
 
 app.use((req, res, next) => {
@@ -100,6 +108,9 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+      // Self-verifying ET clock line: surfaces a mis-zoned / missing-ICU host in
+      // the first log lines, before any gate fires.
+      log(etZoneDiagnostics());
     },
   );
 })();

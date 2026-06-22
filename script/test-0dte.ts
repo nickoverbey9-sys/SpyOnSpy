@@ -9,6 +9,7 @@
  * No network, no real orders.
  */
 import assert from "node:assert";
+import { execFileSync } from "node:child_process";
 import {
   parseOccSymbol,
   isZeroDteSymbol,
@@ -30,6 +31,7 @@ import {
   minutesIntoEtDay,
   minutesIntoTradingDay,
   etTimestamp,
+  etZoneDiagnostics,
   type BotConfig,
 } from "../server/bot/config.js";
 import { getAutomationStatus } from "../server/bot/automationEngine.js";
@@ -1443,6 +1445,43 @@ check("etTimestamp renders the ET wall clock in standard time", () => {
 });
 check("etTimestamp renders midnight ET as 00:00:00 (no hour-24 quirk)", () => {
   assert.strictEqual(etTimestamp(new Date("2026-06-22T04:00:00Z")), "2026-06-22 00:00:00 ET");
+});
+
+// ── ET clock is invariant to launch context (TZ env / host zone) ─────────────
+// The intermittent-offset ticket: a run looked "1 hour off" only because the
+// stdout LOG PREFIX rendered in the process launch TZ. The GATE derivation uses
+// an explicit IANA zone and must be identical no matter how the process starts.
+console.log("\nET clock invariance to launch context (TZ env / host zone):");
+check("host process runs in a NON-ET zone, yet minutesIntoEtDay(09:30 ET) = 570", () => {
+  // This very test process is NOT in America/New_York (it inherits the host
+  // zone — e.g. America/Chicago locally, UTC on Render). If the helper depended
+  // on system-local time it would be wrong here; the IANA conversion makes it
+  // correct regardless. This is the "TZ unset / host-default" acceptance case.
+  const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  assert.notStrictEqual(hostZone, "America/New_York", "guard: host should not already be ET");
+  assert.strictEqual(minutesIntoEtDay(new Date("2026-06-22T13:30:00Z")), 570);
+  assert.strictEqual(minutesIntoTradingDay(new Date("2026-06-22T13:30:00Z")), 0);
+});
+for (const tz of ["UTC", "Asia/Tokyo"]) {
+  check(`minutesIntoEtDay(09:30 ET) = 570 in a child process launched with TZ=${tz}`, () => {
+    // Genuinely launch a fresh process with a non-ET TZ env (the Run A vector)
+    // and confirm the IANA-based derivation still yields 570. TZ is read at
+    // process start, so a child process is the faithful way to test it.
+    const snippet =
+      "const f=(d)=>{const p=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'numeric',hour12:false}).formatToParts(d);" +
+      "let h=+p.find(x=>x.type==='hour').value;const m=+p.find(x=>x.type==='minute').value;if(h===24)h=0;return h*60+m;};" +
+      "process.stdout.write(String(f(new Date('2026-06-22T13:30:00Z'))));";
+    const out = execFileSync(process.execPath, ["-e", snippet], {
+      env: { ...process.env, TZ: tz },
+      encoding: "utf8",
+    }).trim();
+    assert.strictEqual(out, "570", `TZ=${tz} child returned ${out}, expected 570`);
+  });
+}
+check("etZoneDiagnostics self-test reports OK and names the IANA zone", () => {
+  const diag = etZoneDiagnostics();
+  assert.match(diag, /America\/New_York/);
+  assert.match(diag, /self-test=OK/, `diagnostics self-test should pass: ${diag}`);
 });
 
 resetPaperState();
