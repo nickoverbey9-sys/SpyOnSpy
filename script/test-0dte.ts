@@ -28,6 +28,8 @@ import {
   getAutoTradeReadiness,
   isWithinOpenOverrideWindow,
   minutesIntoEtDay,
+  minutesIntoTradingDay,
+  etTimestamp,
   type BotConfig,
 } from "../server/bot/config.js";
 import { getAutomationStatus } from "../server/bot/automationEngine.js";
@@ -1317,10 +1319,13 @@ check("maxTradesPerDay=-1 (negative) is also treated as unlimited", () => {
   );
   assert.strictEqual(r.allowed, true, r.reason);
 });
-check("default getBotConfig() ships unlimited counts (0/0)", () => {
+check("default getBotConfig() ships finite risk-hardened counts (2 / 50)", () => {
+  // RISK-DEFAULT PATCH: unlimited counts were unsafe for a small account. The
+  // <= 0 = UNLIMITED semantics still work if an operator sets them (covered by
+  // the unlimitedCfg tests above), but the shipped DEFAULTS are finite.
   const c = getBotConfig();
-  assert.strictEqual(c.maxOpenPositions, 0, "maxOpenPositions default should be 0 (unlimited)");
-  assert.strictEqual(c.maxTradesPerDay, 0, "maxTradesPerDay default should be 0 (unlimited)");
+  assert.strictEqual(c.maxOpenPositions, 2, "maxOpenPositions default is 2 (finite)");
+  assert.strictEqual(c.maxTradesPerDay, 50, "maxTradesPerDay default is 50 (finite)");
 });
 
 console.log("\nPreserved hard stops still block even when counts are unlimited:");
@@ -1398,6 +1403,48 @@ check("EXITS are unaffected by the entry guardrail (stop fires inside the openin
   assert.strictEqual(a.kind, "stop", "exit must fire regardless of the entry blackout");
   assert.match(a.reason, /stop loss/i);
 });
+// ── ET session clock (DST-aware, single source of truth) ────────────────────
+// Verified at BOTH a DST date (June, EDT, UTC-4) and a standard-time date
+// (January, EST, UTC-5) to prove the IANA-zone conversion — not a hardcoded
+// offset — governs every intraday gate.
+console.log("\nET session clock (minutesIntoEtDay / minutesIntoTradingDay, DST-aware):");
+check("minutesIntoEtDay = 570 at 09:30 ET in DST (June, 13:30Z)", () => {
+  assert.strictEqual(minutesIntoEtDay(new Date("2026-06-22T13:30:00Z")), 570);
+});
+check("minutesIntoEtDay = 570 at 09:30 ET in standard time (January, 14:30Z)", () => {
+  assert.strictEqual(minutesIntoEtDay(new Date("2026-01-15T14:30:00Z")), 570);
+});
+check("minutesIntoEtDay = 0 at midnight ET (no V8 hour-24 quirk), DST", () => {
+  assert.strictEqual(minutesIntoEtDay(new Date("2026-06-22T04:00:00Z")), 0);
+});
+check("minutesIntoEtDay = 0 at midnight ET, standard time", () => {
+  assert.strictEqual(minutesIntoEtDay(new Date("2026-01-15T05:00:00Z")), 0);
+});
+check("minutesIntoTradingDay = 0 at exactly 09:30:00 ET (DST)", () => {
+  assert.strictEqual(minutesIntoTradingDay(new Date("2026-06-22T13:30:00Z")), 0);
+});
+check("minutesIntoTradingDay = 0 at exactly 09:30:00 ET (standard time)", () => {
+  assert.strictEqual(minutesIntoTradingDay(new Date("2026-01-15T14:30:00Z")), 0);
+});
+check("minutesIntoTradingDay = 390 at 16:00:00 ET (DST, 20:00Z)", () => {
+  assert.strictEqual(minutesIntoTradingDay(new Date("2026-06-22T20:00:00Z")), 390);
+});
+check("minutesIntoTradingDay = 390 at 16:00:00 ET (standard time, 21:00Z)", () => {
+  assert.strictEqual(minutesIntoTradingDay(new Date("2026-01-15T21:00:00Z")), 390);
+});
+check("minutesIntoTradingDay is negative before the open (09:00 ET = -30)", () => {
+  assert.strictEqual(minutesIntoTradingDay(new Date("2026-06-22T13:00:00Z")), -30);
+});
+check("etTimestamp renders the ET wall clock for self-verifying logs (DST)", () => {
+  assert.strictEqual(etTimestamp(new Date("2026-06-22T13:36:12Z")), "2026-06-22 09:36:12 ET");
+});
+check("etTimestamp renders the ET wall clock in standard time", () => {
+  assert.strictEqual(etTimestamp(new Date("2026-01-15T14:36:12Z")), "2026-01-15 09:36:12 ET");
+});
+check("etTimestamp renders midnight ET as 00:00:00 (no hour-24 quirk)", () => {
+  assert.strictEqual(etTimestamp(new Date("2026-06-22T04:00:00Z")), "2026-06-22 00:00:00 ET");
+});
+
 resetPaperState();
 check("same-day 0DTE guard still blocks a later-dated contract (unchanged)", () => {
   const signals = generateSignals(
@@ -1420,10 +1467,11 @@ console.log("\nSmall-account risk profile defaults:");
 check("default stopLossFraction is 0.20", () => {
   assert.strictEqual(getBotConfig().stopLossFraction, 0.20);
 });
-check("default trailStartFraction is 0.25 (+25% arm) and giveback 0.05", () => {
+check("default trailStartFraction is 0.25 (+25% arm) and giveback 0.15 (noise-floor patch)", () => {
   const c = getBotConfig();
   assert.strictEqual(c.trailStartFraction, 0.25);
-  assert.strictEqual(c.trailGivebackFraction, 0.05);
+  // 5% give-back fired on routine 0DTE quote jitter; widened to 15%.
+  assert.strictEqual(c.trailGivebackFraction, 0.15);
 });
 check("default maxLossPerTrade is 100 and start balance 1326.24", () => {
   const c = getBotConfig();
@@ -1454,16 +1502,17 @@ check("sizing chooses 4 when cash allows the preferred size", () => {
   assert.strictEqual(s.projectedStopLoss, 40);
   assert.match(s.reason, /preferred target/i);
 });
-check("max-loss-per-trade NO LONGER downsizes: 4 ctr allowed when cash suffices (premium 1.50)", () => {
-  // premium 1.50 → stop risk $30/ctr (20% stop). 4 ctr = $120 projected stop
-  // loss > the old $100 cap, but that cap is no longer a sizing blocker. Cash
-  // for 4 ctr = $600 ≤ $1326 → prefer 4. Projected stop loss is reported only.
+check("max-loss-per-trade downsizes to fit the $100 cap (premium 1.50 → 3 ctr)", () => {
+  // PER-TRADE RISK PATCH (enforceMaxLossPerTrade default on): premium 1.50 →
+  // stop risk $30/ctr (20% stop). 4 ctr would risk $120 > the $100 cap, so sizing
+  // steps down to 3 ctr ($90 projected stop risk ≤ cap). Cash for 3 ctr = $450 ≤
+  // $1326, so the risk cap (not cash) is the binding constraint.
   const s = sizePosition(1.5, getBotConfig(), 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
-  assert.strictEqual(s.contracts, 4, "should buy preferred 4 even though projected loss > old cap");
-  assert.strictEqual(s.fellBackFromPreferred, false);
-  assert.strictEqual(s.projectedStopLoss, 120, "projected stop loss reported, not enforced");
-  assert.match(s.reason, /preferred target/i);
+  assert.strictEqual(s.contracts, 3, "downsized to 3 by the per-trade risk cap");
+  assert.strictEqual(s.fellBackFromPreferred, true);
+  assert.strictEqual(s.projectedStopLoss, 90, "projected stop risk fits the $100 cap");
+  assert.match(s.reason, /per-trade risk cap/i);
 });
 check("sizing falls back to 3 when cash cannot afford 4", () => {
   // premium 1.00, cash only $350 → 4 ctr cost $400 > cash; 3 ctr $300 ≤ cash
@@ -1475,15 +1524,15 @@ check("sizing falls back to 3 when cash cannot afford 4", () => {
   assert.match(s.reason, /fallback to 3 contract/i);
   assert.match(s.reason, /cash/i);
 });
-check("max-loss-per-trade NO LONGER downsizes: 4 ctr allowed when cash suffices (premium 2.00)", () => {
-  // premium 2.00 → stop risk $40/ctr (20% stop). 4 ctr = $160 projected stop
-  // loss > old $100 cap, but cash for 4 ctr = $800 ≤ $1326 → still prefer 4.
+check("max-loss-per-trade downsizes to fit the $100 cap (premium 2.00 → 2 ctr)", () => {
+  // premium 2.00 → stop risk $40/ctr (20% stop). 4 ctr would risk $160 > the $100
+  // cap → step down to 2 ctr ($80 ≤ cap). Cash for 2 ctr = $400 ≤ $1326.
   const s = sizePosition(2.0, getBotConfig(), 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
-  assert.strictEqual(s.contracts, 4, "should buy preferred 4 — max-loss cap no longer binds");
-  assert.strictEqual(s.fellBackFromPreferred, false);
-  assert.strictEqual(s.projectedStopLoss, 160);
-  assert.match(s.reason, /preferred target/i);
+  assert.strictEqual(s.contracts, 2, "downsized to 2 by the per-trade risk cap");
+  assert.strictEqual(s.fellBackFromPreferred, true);
+  assert.strictEqual(s.projectedStopLoss, 80);
+  assert.match(s.reason, /per-trade risk cap/i);
 });
 check("sizing falls back to 2 when cash affords only 2 (not 3 or 4)", () => {
   // premium 1.00, cash only $250 → 4 ctr $400 and 3 ctr $300 > cash; 2 ctr $200
@@ -1495,14 +1544,14 @@ check("sizing falls back to 2 when cash affords only 2 (not 3 or 4)", () => {
   assert.match(s.reason, /fallback to 2 contract/i);
   assert.match(s.reason, /cash/i);
 });
-check("entry NOT blocked by projected stop loss alone (premium 3.00, ample cash)", () => {
-  // premium 3.00 → stop risk $60/ctr (20% stop). 4 ctr = $240 projected stop
-  // loss far exceeds the old $100 cap, but cash for 4 ctr = $1200 ≤ $1326, so
-  // the entry is ALLOWED at the preferred 4. Previously this was BLOCKED.
+check("entry BLOCKED by the per-trade risk cap when even the minimum 2 ctr breach it (premium 3.00)", () => {
+  // premium 3.00 → stop risk $60/ctr (20% stop). Even the hard-minimum 2 ctr
+  // project $120 stop risk > the $100 cap, so the entry is SKIPPED despite ample
+  // cash ($1326). The per-trade risk cap (enforce default on) is authoritative.
   const s = sizePosition(3.0, getBotConfig(), 1326.24);
-  assert.strictEqual(s.allowed, true, s.reason);
-  assert.strictEqual(s.contracts, 4, "no longer blocked by max-loss-per-trade");
-  assert.strictEqual(s.projectedStopLoss, 240);
+  assert.strictEqual(s.allowed, false, s.reason);
+  assert.strictEqual(s.contracts, 0);
+  assert.match(s.reason, /per-trade risk cap/i);
 });
 check("entry BLOCKED when cash cannot afford even 2 contracts", () => {
   // premium 1.00, cash only $150 → 2 ctr cost $200 > $150 available (1-ctr
@@ -1544,21 +1593,20 @@ check("larger preferred honored when cash allows it", () => {
   assert.strictEqual(s.contracts, 5);
   assert.strictEqual(s.fellBackFromPreferred, false);
 });
-check("4-ctr entry allowed when buying power suffices even though projected loss > old maxLossPerTrade, AND hard stop still fires", () => {
-  // premium 1.50, stop 20% → projected stop loss on 4 ctr = 1.50 × 0.20 × 100 ×
-  // 4 = $120, which exceeds the old $100 maxLossPerTrade. With sufficient cash
-  // ($600 ≤ $1326) the entry is now ALLOWED at the preferred 4.
+check("per-trade risk cap downsizes to 3 ctr when projected loss would exceed the cap, AND the -20% hard stop still fires on it", () => {
+  // premium 1.50, stop 20% → $30/ctr stop risk. 4 ctr ($120) breaches the $100
+  // cap, so sizing steps down to 3 ctr ($90 ≤ cap) with ample cash ($1326).
   const cfg = getBotConfig();
   const sizing = sizePosition(1.5, cfg, 1326.24);
   assert.strictEqual(sizing.allowed, true, sizing.reason);
-  assert.strictEqual(sizing.contracts, 4, "4-ctr entry must be allowed");
+  assert.strictEqual(sizing.contracts, 3, "downsized to 3 by the per-trade risk cap");
   assert.ok(
-    sizing.projectedStopLoss > cfg.maxLossPerTrade,
-    `projected loss ${sizing.projectedStopLoss} should exceed old cap ${cfg.maxLossPerTrade}`,
+    sizing.projectedStopLoss <= cfg.maxLossPerTrade,
+    `projected loss ${sizing.projectedStopLoss} should fit the cap ${cfg.maxLossPerTrade}`,
   );
 
   // The actual premium-based hard stop at -20% must STILL fire on that very
-  // 4-contract position: entry 1.50 → stop 1.20; a mark of 1.19 trips the stop.
+  // 3-contract position: entry 1.50 → stop 1.20; a mark of 1.19 trips the stop.
   resetPaperState();
   const pos = openPaperPosition({
     symbol: "SPY260602C00757000",
@@ -1571,10 +1619,10 @@ check("4-ctr entry allowed when buying power suffices even though projected loss
     trailStartFraction: cfg.trailStartFraction,
     trailGivebackFraction: cfg.trailGivebackFraction,
   });
-  assert.strictEqual(pos.contracts, 4, "position opened with 4 contracts");
+  assert.strictEqual(pos.contracts, 3, "position opened with 3 contracts");
   assert.ok(Math.abs(pos.stopPrice - 1.2) < 1e-9, `hard stop set at -20% (1.20), got ${pos.stopPrice}`);
   const action = evaluatePosition(pos, 1.19, cfg, NOW);
-  assert.strictEqual(action.kind, "stop", "hard stop must fire at -20% on the 4-ctr position");
+  assert.strictEqual(action.kind, "stop", "hard stop must fire at -20% on the 3-ctr position");
   assert.match(action.reason, /stop loss/i);
   resetPaperState();
 });
@@ -1692,20 +1740,20 @@ check("single contract never emits trim actions", () => {
   const a = evaluatePosition(p, 1.45, getBotConfig(), NOW);
   assert.strictEqual(a.kind, "hold", `expected hold, got ${a.kind}`);
 });
-check("winner runs past +25% then exits the FULL position on a 5% give-back from peak", () => {
+check("winner runs past +25% then exits the FULL position on a 15% give-back from peak", () => {
   const p = freshSingle(1.0);
-  // Run to +50% (peak 1.50, trail armed at +25%). Trail stop = 1.50 × 0.95 = 1.425.
+  // Run to +50% (peak 1.50, trail armed at +25%). Trail stop = 1.50 × 0.85 = 1.275.
   updateTrail(p.id, 1.50);
   assert.strictEqual(p.trailArmed, true);
   // A pullback to exactly the peak (no give-back) still HOLDS.
   assert.strictEqual(evaluatePosition(p, 1.50, getBotConfig(), NOW).kind, "hold");
-  // A 3% pullback (1.455) is less than the 5% give-back trigger → still HOLD.
-  assert.strictEqual(evaluatePosition(p, 1.455, getBotConfig(), NOW).kind, "hold");
-  // Pull back to 1.42 (below 1.425, the 5% give-back) but above hard stop 0.80 → trailing stop.
-  const a = evaluatePosition(p, 1.42, getBotConfig(), NOW);
+  // A 10% pullback (1.35) is less than the 15% give-back trigger → still HOLD.
+  assert.strictEqual(evaluatePosition(p, 1.35, getBotConfig(), NOW).kind, "hold");
+  // Pull back to 1.27 (below 1.275, the 15% give-back) but above the +5% profit-lock → trailing stop.
+  const a = evaluatePosition(p, 1.27, getBotConfig(), NOW);
   assert.strictEqual(a.kind, "stop");
   assert.match(a.reason, /trailing stop/i);
-  assert.match(a.reason, /5% give-back/i);
+  assert.match(a.reason, /15% give-back/i);
 });
 check("does NOT trail-exit before the +25% arm even on a meaningful pullback", () => {
   const p = freshSingle(1.0);
@@ -1770,14 +1818,14 @@ check("qty=3 never partially trims — contract count is unchanged after passing
   evaluatePosition(p, 1.61, getBotConfig(), NOW);
   assert.strictEqual(p.contracts, 3, "multi-contract size must not be reduced by any trim");
 });
-check("multi-contract exits the FULL position on 5% give-back after the +25% arm", () => {
+check("multi-contract exits the FULL position on 15% give-back after the +25% arm", () => {
   const p = freshMulti(3, 1.0);
-  // Run to +55% (peak 1.55 → trail armed at +25%). Trail stop = 1.55 × 0.95 = 1.4725.
+  // Run to +55% (peak 1.55 → trail armed at +25%). Trail stop = 1.55 × 0.85 = 1.3175.
   updateTrail(p.id, 1.55);
   assert.strictEqual(p.trailArmed, true);
   // All 3 contracts still on (no trims happened) → the stop closes the full size.
   assert.strictEqual(p.contracts, 3, "all contracts must still be open before the trailing exit");
-  const a = evaluatePosition(p, 1.46, getBotConfig(), NOW);
+  const a = evaluatePosition(p, 1.31, getBotConfig(), NOW);
   assert.strictEqual(a.kind, "stop");
   assert.match(a.reason, /trailing stop/i);
 });
@@ -1853,14 +1901,14 @@ check("breakeven NEVER loosens an existing stop — only raises it", () => {
   assert.strictEqual(p.stopPrice, 1.0, "stop must not loosen back below entry");
   assert.strictEqual(p.breakevenArmed, true);
 });
-check("+25% trail still supersedes breakeven/profit-lock (5% give-back from peak beats the locked stop)", () => {
+check("+25% trail still supersedes breakeven/profit-lock (15% give-back from peak beats the locked stop)", () => {
   const p = freshSingle(1.0);
   updateTrail(p.id, 1.50); // +50%: breakeven + profit-lock armed AND trail armed (+25%)
   assert.strictEqual(p.breakevenArmed, true);
   assert.strictEqual(p.profitLockArmed, true);
   assert.strictEqual(p.trailArmed, true);
-  // 5% give-back from the 1.50 peak = 1.425, well above the +5% profit-lock stop 1.05.
-  const a = evaluatePosition(p, 1.42, getBotConfig(), NOW);
+  // 15% give-back from the 1.50 peak = 1.275, still well above the +5% profit-lock stop 1.05.
+  const a = evaluatePosition(p, 1.27, getBotConfig(), NOW);
   assert.strictEqual(a.kind, "stop");
   assert.match(a.reason, /trailing stop/i, "trail give-back supersedes the locked stop");
 });
@@ -1951,8 +1999,8 @@ check("+25% trail give-back supersedes the profit-lock stop on a deep runner", (
   updateTrail(p.id, 1.50); // +50% — profit-lock + trail armed
   assert.strictEqual(p.profitLockArmed, true);
   assert.strictEqual(p.trailArmed, true);
-  // 5% give-back from peak 1.50 = 1.425, far above the +5% lock 1.05 → trail wins.
-  const a = evaluatePosition(p, 1.42, getBotConfig(), NOW);
+  // 15% give-back from peak 1.50 = 1.275, still far above the +5% lock 1.05 → trail wins.
+  const a = evaluatePosition(p, 1.27, getBotConfig(), NOW);
   assert.strictEqual(a.kind, "stop");
   assert.match(a.reason, /trailing stop/i, "trail give-back supersedes the profit-lock stop");
 });
@@ -2045,7 +2093,7 @@ check("status smallAccountProfile note uses no-trim exit text (no 'Trim 30/60%')
   assert.ok(!TRIM_LABEL.test(note), `status note still shows a trim label: "${note}"`);
   assert.match(note, /hard stop/i);
   assert.match(note, /trail arms \+25%/i);
-  assert.match(note, /giveback exit 5% from peak/i);
+  assert.match(note, /giveback exit 15% from peak/i);
   // No misleading legacy +40%, +20%, or +50% trail labels should appear in the note.
   assert.ok(!/\+40%/.test(note), "note must not show the removed +40% trail label");
   assert.ok(!/\+20% (trail|arm)/i.test(note), "note must not show the removed +20% trail label");
@@ -2216,7 +2264,7 @@ await checkAsync("reconcile: adopted position with mark above +25% arms the trai
   resetPaperState();
 });
 
-check("adopted position exits on 5% give-back from peak (evaluatePosition)", () => {
+check("adopted position exits on 15% give-back from peak (evaluatePosition)", () => {
   resetPaperState();
   const sym = brokerOcc("Call", 756);
   const c = getBotConfig();
@@ -2228,8 +2276,8 @@ check("adopted position exits on 5% give-back from peak (evaluatePosition)", () 
     brokerDateAcquired: "2026-06-02T14:00:00.000Z",
   });
   assert.strictEqual(position.trailArmed, true);
-  // Trail stop = 1.60 × 0.95 = 1.52. Pull back to 1.51 → trailing-stop exit.
-  const a = evaluatePosition(position, 1.51, getBotConfig(), NOW);
+  // Trail stop = 1.60 × 0.85 = 1.36. Pull back to 1.35 → trailing-stop exit.
+  const a = evaluatePosition(position, 1.35, getBotConfig(), NOW);
   assert.strictEqual(a.kind, "stop");
   assert.match(a.reason, /trailing stop/i);
   resetPaperState();

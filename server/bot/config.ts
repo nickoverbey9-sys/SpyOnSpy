@@ -221,9 +221,9 @@ export interface BotConfig {
    * so the sizing ladder steps 4 (preferred) → 3 → 2 → 1.
    */
   minContractsPerTrade: number;
-  /** Max concurrent open positions. <= 0 means UNLIMITED. Default: 0 (unlimited) */
+  /** Max concurrent open positions. <= 0 means UNLIMITED. Default: 2 (risk-default patch). */
   maxOpenPositions: number;
-  /** Max trades initiated per calendar day. <= 0 means UNLIMITED. Default: 0 (unlimited) */
+  /** Max trades initiated per calendar day. <= 0 means UNLIMITED. Default: 50 (risk-default patch). */
   maxTradesPerDay: number;
   /** Max total NET realized loss per day (USD). Default: $600 */
   maxDailyLoss: number;
@@ -263,7 +263,8 @@ export interface BotConfig {
   /**
    * Give-back fraction for the trailing stop, measured against the peak premium
    * observed after the trail armed. Exit if premium falls to peak × (1 - this).
-   * Default: 0.05 (5% drop from peak).
+   * Default: 0.15 (15% drop from peak) — widened from 5% by the NOISE-FLOOR
+   * PATCH (5% fired on routine 0DTE quote jitter); see the runtime default.
    */
   trailGivebackFraction: number;
   /**
@@ -631,7 +632,7 @@ export function getBotConfig(): BotConfig {
     // preferred (4) can apply unless an operator sets an explicit cap.
     maxContractsPerTrade: envInt("BOT_MAX_CONTRACTS_PER_TRADE", 0),
     preferredContractsPerTrade: envInt("BOT_PREFERRED_CONTRACTS_PER_TRADE", 4),
-    minContractsPerTrade: envInt("BOT_MIN_CONTRACTS_PER_TRADE", 1),
+    minContractsPerTrade: envInt("BOT_MIN_CONTRACTS_PER_TRADE", 2),
     // RISK-DEFAULT PATCH: unlimited concurrent positions / trades-per-day were
     // unsafe defaults for a small account. <= 0 still means UNLIMITED if an
     // operator explicitly sets it, but the DEFAULTS are now finite.
@@ -719,20 +720,42 @@ export function getBotConfig(): BotConfig {
 }
 
 /**
- * Minutes-from-midnight in America/New_York for a given instant. Used by the
- * open-window liquidation override to decide whether `now` falls inside the
- * narrow 09:30–09:35 ET window regardless of the server's own timezone.
+ * SINGLE DST-aware primitive that every intraday time gate derives from. Returns
+ * the wall-clock hour/minute for an instant in the given IANA timezone, so the
+ * opening guardrail, flatten, pre-market block, and news blackout can never
+ * drift onto different clocks or a brittle fixed UTC offset.
+ *
+ * Handles the V8 quirk where `hour12:false` formats midnight as "24:MM" instead
+ * of "00:MM" — without this, minutesIntoEtDay returned 1440 at 00:00 ET.
  */
-export function minutesIntoEtDay(now = new Date()): number {
+function zonedHourMinute(now: Date, timeZone: string): { hour: number; minute: number } {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+    timeZone,
     hour: "numeric",
     minute: "numeric",
     hour12: false,
   }).formatToParts(now);
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  let hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
   const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  if (hour === 24) hour = 0; // V8 formats midnight as "24:MM" under hour12:false
+  return { hour, minute };
+}
+
+/** Minutes-from-midnight in `timeZone` for an instant, via {@link zonedHourMinute}. */
+function zonedMinutesOfDay(now: Date, timeZone: string): number {
+  const { hour, minute } = zonedHourMinute(now, timeZone);
   return hour * 60 + minute;
+}
+
+/**
+ * Minutes-from-midnight in America/New_York for a given instant. Used by the
+ * open-window liquidation override and the entry guardrail to decide whether
+ * `now` falls inside an ET window regardless of the server's own timezone.
+ * DST-aware (IANA zone, not a hardcoded offset): 09:30 ET = 570 in both EDT and
+ * EST.
+ */
+export function minutesIntoEtDay(now = new Date()): number {
+  return zonedMinutesOfDay(now, "America/New_York");
 }
 
 /** True if `now` is inside the configured open-window override window (ET). */
@@ -744,6 +767,41 @@ export function isWithinOpenOverrideWindow(cfg: BotConfig, now = new Date()): bo
 /** Regular trading hours boundaries in minutes-from-midnight ET. */
 const RTH_OPEN_ET_MIN = 9 * 60 + 30; // 09:30 ET = 570
 const RTH_CLOSE_ET_MIN = 16 * 60;    // 16:00 ET = 960
+
+/**
+ * Minutes since the 09:30 ET regular-session open ("minutes into the trading
+ * day"). Returns 0 at exactly 09:30:00 ET, 390 at 16:00:00 ET, and a negative
+ * value before the open. DST-aware via {@link minutesIntoEtDay}. This is the
+ * single trading-day clock the opening guardrail, flatten, and pre-market block
+ * should reason in so they cannot drift apart.
+ */
+export function minutesIntoTradingDay(now = new Date()): number {
+  return minutesIntoEtDay(now) - RTH_OPEN_ET_MIN;
+}
+
+/**
+ * Human-readable Eastern-time stamp for an instant, e.g.
+ * "2026-06-22 09:36:12 ET". Logged alongside the UTC ISO timestamp on each event
+ * so logs are self-verifying — a reader can confirm an ET-gated action (opening
+ * guardrail, flatten) fired at the ET time its message claims, without mentally
+ * converting from UTC or the viewer's local timezone.
+ */
+export function etTimestamp(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  let hh = get("hour");
+  if (hh === "24") hh = "00"; // V8 midnight quirk under hour12:false
+  return `${get("year")}-${get("month")}-${get("day")} ${hh}:${get("minute")}:${get("second")} ET`;
+}
 
 /**
  * Open/close ENTRY-ONLY time guardrail. Returns a human-readable block reason
@@ -781,14 +839,7 @@ export function entryTimeWindowBlock(cfg: BotConfig, now = new Date()): string |
  * positions are closed before the session-end illiquidity window.
  */
 export function isPastAutoFlatten(cfg: BotConfig, now = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false,
-  }).formatToParts(now);
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
-  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  const { hour, minute } = zonedHourMinute(now, "America/Chicago");
   return (
     hour > cfg.autoFlattenHourCT ||
     (hour === cfg.autoFlattenHourCT && minute >= cfg.autoFlattenMinuteCT)
@@ -802,15 +853,7 @@ export function isPastAutoFlatten(cfg: BotConfig, now = new Date()): boolean {
  */
 export function entryWindowBlock(cfg: BotConfig, now = new Date()): string | null {
   if (cfg.noEntryFirstMinutes <= 0 && cfg.noEntryLastMinutes <= 0) return null;
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false,
-  }).formatToParts(now);
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
-  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
-  const minOfDay = hour * 60 + minute;
+  const minOfDay = zonedMinutesOfDay(now, "America/Chicago");
   const openMin = 8 * 60 + 30;       // 08:30 CT
   const closeMin = 15 * 60;          // 15:00 CT
   if (cfg.noEntryFirstMinutes > 0 && minOfDay >= openMin && minOfDay < openMin + cfg.noEntryFirstMinutes) {
@@ -824,14 +867,7 @@ export function entryWindowBlock(cfg: BotConfig, now = new Date()): string | nul
 
 /** Returns true if it is at or past the hard-flatten cutoff (default 14:30 CT) */
 export function isPastCutoff(cfg: BotConfig, now = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false,
-  }).formatToParts(now);
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
-  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  const { hour, minute } = zonedHourMinute(now, "America/Chicago");
   return hour > cfg.flattenHourCT || (hour === cfg.flattenHourCT && minute >= cfg.flattenMinuteCT);
 }
 

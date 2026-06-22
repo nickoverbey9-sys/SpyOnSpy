@@ -33,6 +33,7 @@ import type { BotConfig } from "./config.js";
 import {
   getBotConfig,
   isNearHighImpactEvent,
+  etTimestamp,
 } from "./config.js";
 import { isZeroDteSymbol } from "./occSymbol.js";
 import {
@@ -74,7 +75,12 @@ export type AutomationEventKind =
   | "lifecycle";
 
 export interface AutomationEvent {
+  /** UTC ISO instant the event was recorded. */
   at: string;
+  /** Same instant rendered in Eastern time ("YYYY-MM-DD HH:MM:SS ET"), so logs
+   * are self-verifying against the ET-gated session clock without UTC/local
+   * conversion. */
+  atEt: string;
   kind: AutomationEventKind;
   message: string;
   /** "LIVE" when a real order was sent, "PAPER" when simulated/observe-only. */
@@ -182,7 +188,14 @@ function logEvent(
   mode: "LIVE" | "PAPER",
   detail?: Record<string, unknown>,
 ): void {
-  const evt: AutomationEvent = { at: new Date().toISOString(), kind, message, mode };
+  const nowDate = new Date();
+  const evt: AutomationEvent = {
+    at: nowDate.toISOString(),
+    atEt: etTimestamp(nowDate),
+    kind,
+    message,
+    mode,
+  };
   if (detail) evt.detail = detail;
   events.push(evt);
   if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
