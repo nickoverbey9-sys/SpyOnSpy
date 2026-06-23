@@ -459,12 +459,20 @@ function aggregateThirtyMinuteCandles(candles: Candle[]): Candle[] {
 
 function getCalendar(): MarketSnapshot["economicCalendar"] {
   const now = new Date();
+  // STATIC PLACEHOLDER calendar — these are recurring time-of-day *windows*, NOT
+  // a live feed of confirmed releases. They are kept for dashboard situational
+  // awareness only and are marked "Medium" so they do NOT drive the hard news
+  // blackout: isNearHighImpactEvent() pauses autonomous entries within
+  // newsBlackoutMinutes of a "High" event, and a fabricated daily "High" at 1:00
+  // PM was blacking out entries ~12:50–1:10 PM EVERY session whether or not a real
+  // event occurred. Only a real high-impact calendar feed should set impact:
+  // "High"; until one is wired, no static placeholder may.
   const events = [
-    { hour: 7, minute: 30, event: "Employment or inflation release window", impact: "High" as const },
+    { hour: 7, minute: 30, event: "Employment or inflation release window", impact: "Medium" as const },
     { hour: 8, minute: 45, event: "PMI / services data watch", impact: "Medium" as const },
-    { hour: 9, minute: 0, event: "ISM, construction, or JOLTS window", impact: "High" as const },
+    { hour: 9, minute: 0, event: "ISM, construction, or JOLTS window", impact: "Medium" as const },
     { hour: 12, minute: 0, event: "Treasury auction / Fed speaker watch", impact: "Medium" as const },
-    { hour: 13, minute: 0, event: "FOMC minutes / Fed headline risk", impact: "High" as const },
+    { hour: 13, minute: 0, event: "FOMC minutes / Fed headline risk", impact: "Medium" as const },
   ];
 
   return events.map((item) => {

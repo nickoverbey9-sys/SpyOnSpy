@@ -37,6 +37,7 @@ import {
   minutesIntoTradingDay,
   etTimestamp,
   etZoneDiagnostics,
+  isNearHighImpactEvent,
   type BotConfig,
 } from "../server/bot/config.js";
 import { getAutomationStatus } from "../server/bot/automationEngine.js";
@@ -3318,6 +3319,49 @@ check("PDT: non-filled and non-option orders are ignored", () => {
     { status: "filled", side: "buy", class: "equity", symbol: "SPY", transaction_date: "2026-06-23T14:30:00Z" },
   ], PDT_NOW);
   assert.strictEqual(r.count, 0);
+});
+
+// ── News blackout fires on HIGH only (placeholder calendar must be Medium) ──────
+// isNearHighImpactEvent pauses autonomous signals within newsBlackoutMinutes of a
+// "High" event. The static dashboard calendar is a set of recurring placeholder
+// windows (not a live feed); a fabricated daily "High" at 1:00 PM was blacking
+// out entries every session. These tests lock the contract: only "High" blocks,
+// so the placeholders (now "Medium") never trigger the blackout.
+console.log("\nNews blackout (High-only) gating:");
+
+// 2026-06-23T17:00Z = 1:00 PM ET (EDT, UTC-4). minutesIntoEtDay → 780.
+const NEWS_NOW = new Date("2026-06-23T17:00:00Z");
+
+check("blackout FIRES within window of a High event at the same ET time", () => {
+  const cal = [{ time: "1:00 PM", impact: "High" as const, status: "Watched" as const }];
+  assert.strictEqual(isNearHighImpactEvent(cal, getBotConfig(), NEWS_NOW), true);
+});
+
+check("blackout does NOT fire for a MEDIUM event at the same ET time (placeholder case)", () => {
+  const cal = [{ time: "1:00 PM", impact: "Medium" as const, status: "Watched" as const }];
+  assert.strictEqual(isNearHighImpactEvent(cal, getBotConfig(), NEWS_NOW), false,
+    "downgraded placeholder windows must not pause autonomous entries");
+});
+
+check("blackout does NOT fire for a High event well outside the window", () => {
+  // 2:00 PM ET (840) is 60 min from 1:00 PM (780) — far beyond the 10-min window.
+  const cal = [{ time: "2:00 PM", impact: "High" as const, status: "Upcoming" as const }];
+  assert.strictEqual(isNearHighImpactEvent(cal, getBotConfig(), NEWS_NOW), false);
+});
+
+check("the full static placeholder set (all Medium) never triggers the blackout", () => {
+  // Mirror of getCalendar()'s windows after the downgrade. They are all Medium, so
+  // none may block — independent of the time of evaluation (tested at 1:00 PM ET,
+  // when the old fabricated "High" placeholder used to fire).
+  const placeholders = [
+    { time: "7:30 AM", impact: "Medium" as const, status: "Released" as const },
+    { time: "8:45 AM", impact: "Medium" as const, status: "Released" as const },
+    { time: "9:00 AM", impact: "Medium" as const, status: "Released" as const },
+    { time: "12:00 PM", impact: "Medium" as const, status: "Released" as const },
+    { time: "1:00 PM", impact: "Medium" as const, status: "Watched" as const },
+  ];
+  assert.strictEqual(isNearHighImpactEvent(placeholders, getBotConfig(), NEWS_NOW), false,
+    "no downgraded placeholder may pause autonomous entries");
 });
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
