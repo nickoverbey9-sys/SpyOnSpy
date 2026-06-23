@@ -495,6 +495,29 @@ export interface OptionQuote {
 }
 
 /**
+ * Select a usable mark from a quote, enforcing the fallback order
+ *
+ *     bid → mid → last
+ *
+ * A value is usable only when it is finite and strictly positive — so a
+ * zero/absent bid (the June-12 zero-bid bug) is NEVER treated as a valid mark
+ * and the next source is tried instead. Returns null when no source yields a
+ * positive price, so the caller can fail safe rather than act on a bad mark.
+ *
+ * Pure and side-effect free (no network) so the fallback policy is unit-tested
+ * directly. The exit loop prefers the BID — the side a long actually sells at —
+ * which this ordering encodes.
+ */
+export function selectMarkFromQuote(quote: OptionQuote): number | null {
+  const usable = (v: number | null): v is number =>
+    v !== null && Number.isFinite(v) && v > 0;
+  if (usable(quote.bid)) return quote.bid;
+  if (usable(quote.mid)) return quote.mid;
+  if (usable(quote.last)) return quote.last;
+  return null;
+}
+
+/**
  * Fetch the full bid/ask/last quote for an option symbol (read-only).
  * Returns nulls on failure — never throws, never fabricates a price.
  */

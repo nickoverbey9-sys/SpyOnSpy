@@ -47,6 +47,7 @@ import {
   buildOptionOrderPayload,
   executeOrder,
   fetchOptionQuote,
+  selectMarkFromQuote,
   waitForFill,
   cancelOrder,
 } from "./tradierAdapter.js";
@@ -519,6 +520,16 @@ async function exitTick(): Promise<void> {
     let anyLiveMark = false;
     for (const pos of open) {
       const mark = await resolveMark(pos, cfg);
+
+      // MARK-FALLBACK FAIL-SAFE: when no valid mark can be resolved from any
+      // source (live quote failed AND no prior mark — resolveMark returns
+      // source "none" with the entry premium only as a placeholder), HOLD. Do
+      // not advance the trail or evaluate the stop against that phantom price,
+      // and do not record it as a P&L mark. The trailing-stop engine therefore
+      // never evaluates against a fabricated mark; resolveMark has already
+      // alerted past the consecutive-failure threshold.
+      if (mark.source === "none") continue;
+
       if (mark.source === "tradier") anyLiveMark = true;
       lastMarks.set(pos.id, mark.value);
 
@@ -597,7 +608,9 @@ async function resolveMark(
   cfg: BotConfig,
 ): Promise<{ value: number; source: "tradier" | "stale" | "none" }> {
   const quote = await fetchOptionQuote(pos.symbol, cfg);
-  const liveValue = quote.bid ?? quote.mid ?? quote.last;
+  // selectMarkFromQuote enforces bid → mid → last and rejects any zero/absent
+  // bid as a valid mark, so a zero-bid contract never flows into stop/P&L logic.
+  const liveValue = selectMarkFromQuote(quote);
   if (liveValue !== null) {
     markFailureCounts.delete(pos.id);
     return { value: liveValue, source: "tradier" };

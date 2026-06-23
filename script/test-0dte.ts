@@ -25,6 +25,7 @@ import {
   executeOrder,
   isTerminalOrderStatus,
   waitForFill,
+  selectMarkFromQuote,
 } from "../server/bot/tradierAdapter.js";
 import {
   getBotConfig,
@@ -3179,6 +3180,39 @@ await checkAsync("order: missing required fields returns 400 and opens nothing",
 });
 
 await new Promise<void>((resolve) => orderServer.close(() => resolve()));
+
+// ── Patch #2: mark-price fallback wiring (selectMarkFromQuote) ───────────────────
+// The exit loop's trailing-stop engine must never evaluate against a bad mark.
+// selectMarkFromQuote is the wired fallback: bid → mid → last, with a zero/absent
+// bid rejected outright (June-12 zero-bid bug), and null when no source yields a
+// positive price so the caller can fail safe.
+console.log("\nMark-price fallback wiring (Patch #2):");
+
+check("mark fallback: a positive bid is the primary mark", () => {
+  assert.strictEqual(selectMarkFromQuote({ bid: 1.20, ask: 1.30, mid: 1.25, last: 1.22 }), 1.20);
+});
+
+check("mark fallback: ZERO bid is rejected, falls through to mid", () => {
+  // The exact June-12 failure shape: bid 0, but a usable mid/last exists.
+  assert.strictEqual(selectMarkFromQuote({ bid: 0, ask: 1.30, mid: 1.25, last: 1.22 }), 1.25);
+});
+
+check("mark fallback: absent (null) bid falls through to mid", () => {
+  assert.strictEqual(selectMarkFromQuote({ bid: null, ask: null, mid: 1.10, last: 1.05 }), 1.10);
+});
+
+check("mark fallback: zero bid AND no mid falls through to last", () => {
+  assert.strictEqual(selectMarkFromQuote({ bid: 0, ask: 0, mid: null, last: 0.90 }), 0.90);
+});
+
+check("mark fallback: negative/non-finite values are never used as a mark", () => {
+  assert.strictEqual(selectMarkFromQuote({ bid: -1, ask: null, mid: Number.NaN, last: 0.75 }), 0.75);
+});
+
+check("mark fallback: no positive source anywhere → null (caller fails safe, holds)", () => {
+  assert.strictEqual(selectMarkFromQuote({ bid: 0, ask: 0, mid: 0, last: 0 }), null);
+  assert.strictEqual(selectMarkFromQuote({ bid: null, ask: null, mid: null, last: null }), null);
+});
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
