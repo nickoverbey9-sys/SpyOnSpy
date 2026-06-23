@@ -51,6 +51,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import NotFound from "@/pages/not-found";
+import BotCockpit from "@/components/BotCockpit";
 
 type Candle = {
   time: string;
@@ -3694,7 +3695,7 @@ function Dashboard() {
             />
           </section>
 
-          <Tabs defaultValue="bot" className="space-y-5">
+          <Tabs defaultValue="overview" className="space-y-5">
             <TabsList className="grid w-full grid-cols-6 md:w-[980px]" data-testid="tabs-main">
               <TabsTrigger value="overview" data-testid="tab-overview">
                 Overview
@@ -3718,14 +3719,7 @@ function Dashboard() {
             </TabsList>
 
             <TabsContent value="overview" className="space-y-5">
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.8fr)]">
-                <PriceChart snapshot={snapshot} />
-                <div className="space-y-5">
-                  <ProviderPanel snapshot={snapshot} />
-                  <SentimentPanel snapshot={snapshot} />
-                  <Setups snapshot={snapshot} />
-                </div>
-              </div>
+              <BotCockpit snapshot={snapshot} />
             </TabsContent>
 
             <TabsContent value="liquidity" className="space-y-5">
