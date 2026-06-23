@@ -43,7 +43,8 @@
   --chart-3: 350 75% 52%;
   --chart-4: 199 89% 48%;
   --chart-5: 271 72% 62%;
-  --font-sans: Geist, Inter, sans-serif;
+  /* Terminal reskin: monospace everywhere (matches the SpyOnSpy mockup look) */
+  --font-sans: "JetBrains Mono", "Fira Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-serif: "Source Serif 4", Georgia, serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
   --radius: 0.5rem;
@@ -107,39 +108,39 @@
   --opaque-button-border-intensity: 9;
   --elevate-1: rgba(255, 255, 255, 0.04);
   --elevate-2: rgba(255, 255, 255, 0.09);
-  --background: 216 31% 6%;
-  --foreground: 210 26% 91%;
-  --border: 216 18% 18%;
-  --card: 217 29% 9%;
-  --card-foreground: 210 26% 91%;
-  --card-border: 216 18% 15%;
+  --background: 217 27% 6%;
+  --foreground: 213 35% 93%;
+  --border: 215 26% 18%;
+  --card: 218 28% 10%;
+  --card-foreground: 213 35% 93%;
+  --card-border: 216 24% 16%;
   --sidebar: 218 33% 7%;
-  --sidebar-foreground: 210 26% 91%;
-  --sidebar-border: 216 18% 15%;
-  --sidebar-primary: 188 69% 53%;
-  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-foreground: 213 35% 93%;
+  --sidebar-border: 216 24% 16%;
+  --sidebar-primary: 211 100% 65%;
+  --sidebar-primary-foreground: 217 27% 6%;
   --sidebar-accent: 216 24% 14%;
-  --sidebar-accent-foreground: 210 26% 91%;
-  --sidebar-ring: 188 69% 53%;
+  --sidebar-accent-foreground: 213 35% 93%;
+  --sidebar-ring: 211 100% 65%;
   --popover: 217 29% 10%;
-  --popover-foreground: 210 26% 91%;
+  --popover-foreground: 213 35% 93%;
   --popover-border: 216 18% 17%;
-  --primary: 188 69% 53%;
-  --primary-foreground: 216 31% 6%;
+  --primary: 211 100% 65%;
+  --primary-foreground: 217 27% 6%;
   --secondary: 216 24% 14%;
-  --secondary-foreground: 210 26% 91%;
+  --secondary-foreground: 213 35% 93%;
   --muted: 216 24% 14%;
-  --muted-foreground: 215 13% 64%;
-  --accent: 190 28% 16%;
-  --accent-foreground: 210 26% 91%;
-  --destructive: 350 82% 62%;
+  --muted-foreground: 214 15% 60%;
+  --accent: 211 30% 16%;
+  --accent-foreground: 213 35% 93%;
+  --destructive: 354 100% 68%;
   --destructive-foreground: 0 0% 98%;
   --input: 216 18% 28%;
-  --ring: 188 69% 53%;
-  --chart-1: 188 69% 53%;
-  --chart-2: 38 92% 58%;
-  --chart-3: 350 82% 66%;
-  --chart-4: 199 89% 62%;
+  --ring: 211 100% 65%;
+  --chart-1: 211 100% 65%;
+  --chart-2: 39 90% 61%;
+  --chart-3: 354 100% 68%;
+  --chart-4: 160 63% 53%;
   --chart-5: 271 72% 68%;
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0);
@@ -350,4 +351,32 @@
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
   }
+}
+
+/* ─── Terminal panel chrome (SpyOnSpy mockup reskin) ────────────────────────
+ * Gives every shadcn Card the mockup's "panel" look: a subtle top-to-bottom
+ * gradient fill and a 2px left accent rail. Scoped to dark mode so light mode
+ * keeps the stock card styling. Purely cosmetic — no layout/data impact. */
+.dark .shadcn-card {
+  position: relative;
+  background-image: linear-gradient(
+    180deg,
+    hsl(var(--card)),
+    hsl(217 30% 7%)
+  );
+}
+
+.dark .shadcn-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: hsl(var(--primary));
+  opacity: 0.55;
+  border-top-left-radius: inherit;
+  border-bottom-left-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
 }
