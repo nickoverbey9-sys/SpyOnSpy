@@ -23,6 +23,8 @@ import {
   assertZeroDteOpen,
   executePaperOrder,
   executeOrder,
+  isTerminalOrderStatus,
+  waitForFill,
 } from "../server/bot/tradierAdapter.js";
 import {
   getBotConfig,
@@ -3087,6 +3089,96 @@ await checkAsync("close: missing required fields returns 400", async () => {
 });
 
 await new Promise<void>((resolve) => closeServer.close(() => resolve()));
+
+// ── Patch #1: order fill-confirmation primitives + manual /api/bot/order ─────────
+// A live order is only ACCEPTED at submission; the position must not be treated
+// as open until a fill is confirmed by order-status polling. These tests pin the
+// terminal-status classification and the FAIL-SAFE timeout behavior with no
+// network (no creds → status endpoint unreachable → "unknown"), and assert the
+// PAPER order route opens at the requested premium and reports the confirmed
+// quantity/price fields. No real network/orders.
+console.log("\nOrder fill confirmation (Patch #1):");
+
+check("terminal statuses are classified terminal (filled/canceled/rejected/expired/error)", () => {
+  for (const s of ["filled", "canceled", "cancelled", "rejected", "expired", "error", "FILLED", "Rejected"]) {
+    assert.strictEqual(isTerminalOrderStatus(s), true, `${s} should be terminal`);
+  }
+});
+
+check("working statuses are NOT terminal (open/pending/partially_filled/null)", () => {
+  for (const s of ["open", "pending", "partially_filled", "ok", "calculated", ""]) {
+    assert.strictEqual(isTerminalOrderStatus(s), false, `${s} should not be terminal`);
+  }
+  assert.strictEqual(isTerminalOrderStatus(null), false, "null is not terminal");
+});
+
+await checkAsync("waitForFill fails safe to 'unknown' when status is unverifiable (no creds, fast timeout)", async () => {
+  const cfg = getBotConfig();
+  // No TRADIER_TOKEN/ACCOUNT_ID in the test env → getOrderStatus returns
+  // unavailable every poll → never assume a fill; outcome must be "unknown".
+  const t0 = Date.now();
+  const fill = await waitForFill("phantom-order-id", cfg, 200, 50);
+  assert.strictEqual(fill.outcome, "unknown", "unverifiable status must NOT be treated as filled");
+  assert.strictEqual(fill.avgFillPrice, null, "no fabricated fill price");
+  assert.strictEqual(fill.execQuantity, null, "no assumed executed quantity");
+  assert.ok(Date.now() - t0 >= 180, "polled until the timeout before giving up");
+});
+
+// Manual /api/bot/order route — PAPER path (live disabled in the test env). The
+// fill-confirmation branch is live-only, so a paper order still opens locally,
+// but now reports the confirmed quantity/price fields used by the live path.
+const orderApp = express();
+orderApp.use(express.json());
+registerBotRoutes(orderApp, emptySnapshot as never);
+const orderServer = orderApp.listen(0);
+await new Promise<void>((resolve) => orderServer.once("listening", () => resolve()));
+const orderPort = (orderServer.address() as { port: number }).port;
+async function postOrder(body: unknown) {
+  const res = await fetch(`http://127.0.0.1:${orderPort}/api/bot/order`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, json: await res.json() as Record<string, unknown> };
+}
+
+// The paper order route runs through executeOrder → executePaperOrder, whose
+// 0DTE guard parses the OCC expiry against the REAL system clock (not the pinned
+// NOW). Build a same-day symbol from the real market date so the open succeeds.
+const realToday = marketDateNY(new Date());
+const realYymmdd = realToday.slice(2).replace(/-/g, "");
+const todayOcc = (side: "Call" | "Put", strike: number) =>
+  `SPY${realYymmdd}${side === "Call" ? "C" : "P"}${String(Math.round(strike * 1000)).padStart(8, "0")}`;
+
+await checkAsync("order (paper): opens at requested premium and reports confirmed fields", async () => {
+  resetPaperState();
+  const sym = todayOcc("Call", 757);
+  const { status, json } = await postOrder({
+    optionSymbol: sym, side: "buy_to_open", contracts: 2, orderType: "limit",
+    limitPrice: 1.25, strike: 757, expiry: realToday, entryPremium: 1.25,
+  });
+  assert.strictEqual(status, 200, "paper order returns 200");
+  assert.strictEqual(json.mode, "PAPER", "live disabled → PAPER mode");
+  assert.strictEqual(json.simulated, true, "paper order is simulated, no broker poll");
+  assert.strictEqual(json.partialFill, false, "paper order is never a partial");
+  assert.strictEqual(json.filledContracts, 2, "paper fills the requested quantity");
+  assert.strictEqual(json.fillPremium, 1.25, "paper basis is the requested premium");
+  const pos = json.position as Record<string, unknown>;
+  assert.strictEqual(pos.contracts, 2);
+  assert.strictEqual(pos.entryPremium, 1.25);
+  assert.strictEqual(getOpenPositions().length, 1, "paper position is opened");
+  resetPaperState();
+});
+
+await checkAsync("order: missing required fields returns 400 and opens nothing", async () => {
+  resetPaperState();
+  const { status } = await postOrder({ optionSymbol: brokerOcc("Call", 757) });
+  assert.strictEqual(status, 400);
+  assert.strictEqual(getOpenPositions().length, 0, "no position on a malformed request");
+  resetPaperState();
+});
+
+await new Promise<void>((resolve) => orderServer.close(() => resolve()));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

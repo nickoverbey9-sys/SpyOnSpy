@@ -46,6 +46,8 @@ import {
   executePaperOrder,
   fetchAccountSnapshot,
   fetchBrokerPositions,
+  waitForFill,
+  cancelOrder,
 } from "./tradierAdapter.js";
 import {
   canOpenPosition,
@@ -578,16 +580,94 @@ export function registerBotRoutes(app: Express, getSnapshot: SnapshotFn): void {
 
     try {
       const result = await executeOrder(payload, cfg, confirmLiveOrder === true);
-      const premium = Number(entryPremium) || Number(limitPrice) || 0.50;
 
-      // Track locally regardless of live/paper
+      // The requested/synthetic premium is used ONLY to value a PAPER fill. A
+      // real live fill must be valued at the broker-reported average price, never
+      // this number — recording the requested price as the basis silently
+      // mis-states P&L and the stop.
+      const requestedPremium = Number(entryPremium) || Number(limitPrice) || 0.50;
+      const requestedContracts = Number(contracts);
+
+      let fillPremium = requestedPremium;
+      let filledContracts = requestedContracts;
+      let partialFill = false;
+
+      // ── FILL-CONFIRMATION (live only) ───────────────────────────────────────
+      // A live order is merely ACCEPTED at submission, not filled. Do NOT open a
+      // local position until Tradier confirms execution. Poll the order status,
+      // record the ACTUAL average fill price and executed quantity, and cancel
+      // any unfilled remainder. On rejection/timeout, open NO position and surface
+      // the failure to the caller — never assume a synthetic fill. Paper orders
+      // (result.simulated) skip this: they have no real broker fill to confirm.
+      if (!result.simulated) {
+        if (!result.orderId) {
+          res.status(502).json({
+            error:
+              "Live order returned no order id — fill cannot be confirmed; no position opened. " +
+              "Verify in your Tradier dashboard.",
+            mode: "LIVE",
+            tradierResponse: result.tradierResponse,
+          });
+          return;
+        }
+
+        const fill = await waitForFill(result.orderId, cfg, cfg.entryFillTimeoutMs);
+
+        if (fill.outcome === "filled") {
+          filledContracts = fill.execQuantity ?? requestedContracts;
+          fillPremium = fill.avgFillPrice ?? requestedPremium;
+        } else if (fill.outcome === "partial") {
+          // Keep what executed, cancel the working remainder, flag for review.
+          await cancelOrder(result.orderId, cfg);
+          filledContracts = fill.execQuantity ?? 0;
+          fillPremium = fill.avgFillPrice ?? requestedPremium;
+          if (filledContracts < 1) {
+            res.status(502).json({
+              error: `Live order ${result.orderId} canceled with no executed contracts — no position opened.`,
+              mode: "LIVE",
+              orderId: result.orderId,
+              status: fill.status,
+            });
+            return;
+          }
+          partialFill = true;
+        } else if (fill.outcome === "unfilled" || fill.outcome === "rejected") {
+          // unfilled: nothing executed before timeout — cancel the working order.
+          // rejected/canceled/expired: terminal with zero executed.
+          if (fill.outcome === "unfilled") await cancelOrder(result.orderId, cfg);
+          res.status(502).json({
+            error: `Live order ${result.orderId} ${fill.outcome} (status ${fill.status ?? "?"}) — no position opened.`,
+            mode: "LIVE",
+            orderId: result.orderId,
+            status: fill.status,
+          });
+          return;
+        } else {
+          // "unknown": the status endpoint was unreachable. FAIL SAFE — do not
+          // assume a fill and do not assume a miss. Best-effort cancel and open NO
+          // local position; the automation reconciler adopts the position later if
+          // the order actually executed, avoiding a managed phantom either way.
+          await cancelOrder(result.orderId, cfg);
+          res.status(502).json({
+            error:
+              `Live order ${result.orderId} status unverifiable (fill-confirmation timeout) — no position opened. ` +
+              "The automation reconciler will adopt it if it filled; verify in your Tradier dashboard.",
+            mode: "LIVE",
+            orderId: result.orderId,
+          });
+          return;
+        }
+      }
+
+      // Track locally — PAPER at the requested premium, LIVE at the CONFIRMED
+      // fill price/quantity (never the requested/synthetic price).
       const pos = openPaperPosition({
         symbol: optionSymbol,
         side: side.includes("put") || body.bias === "Put" ? "Put" : "Call",
         strike: Number(strike) || 0,
         expiry: expiry ?? new Date().toISOString().slice(0, 10),
-        contracts: Number(contracts),
-        entryPremium: premium,
+        contracts: filledContracts,
+        entryPremium: fillPremium,
         stopFraction: cfg.stopLossFraction,
         takeProfitFraction: cfg.takeProfitFraction,
         trailStartFraction: cfg.trailStartFraction,
@@ -598,13 +678,25 @@ export function registerBotRoutes(app: Express, getSnapshot: SnapshotFn): void {
         setupTitle: body.setupTitle,
       });
 
+      const goingLive = cfg.liveEnabled && confirmLiveOrder === true;
+      const warnings = goingLive
+        ? ["🔴 LIVE ORDER FILLED ON TRADIER. Verify in your Tradier dashboard."]
+        : ["🟡 Paper/test order — no real trade placed."];
+      if (partialFill) {
+        warnings.push(
+          `⚠ PARTIAL FILL: ${filledContracts}/${requestedContracts} contracts executed @ ${fillPremium.toFixed(2)}; ` +
+            "remainder canceled. Position opened for the executed quantity — review.",
+        );
+      }
+
       res.json({
         ...result,
         position: pos,
-        mode: cfg.liveEnabled && confirmLiveOrder === true ? "LIVE" : "PAPER",
-        warnings: cfg.liveEnabled && confirmLiveOrder === true
-          ? ["🔴 LIVE ORDER SENT TO TRADIER. Verify in your Tradier dashboard."]
-          : ["🟡 Paper/test order — no real trade placed."],
+        filledContracts,
+        fillPremium,
+        partialFill,
+        mode: goingLive ? "LIVE" : "PAPER",
+        warnings,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
