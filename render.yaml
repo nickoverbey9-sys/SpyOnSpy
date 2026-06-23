@@ -9,3 +9,10 @@ services:
         value: production
       - key: TRADIER_TOKEN
         sync: false
+      # Max age (seconds) of the newest live 1m candle before the fresh-data
+      # guard blocks entries. Must exceed the 1m bar interval plus feed latency —
+      # a 1m candle is naturally 0–60s old, so anything ≤60 flaps and blocks
+      # entries for ~half of every minute. 120 = one bar + ~60s headroom; only a
+      # real >2min data outage trips it. (Code default is also 120.)
+      - key: BOT_MAX_CANDLE_STALENESS_SEC
+        value: "120"
