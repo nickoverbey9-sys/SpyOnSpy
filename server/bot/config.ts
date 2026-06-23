@@ -217,7 +217,7 @@ export interface BotConfig {
   preferredContractsPerTrade: number;
   /**
    * Hard minimum contracts per trade. If the largest affordable / risk-safe
-   * size is below this, the entry is SKIPPED rather than opened. Default: 2,
+   * size is below this, the entry is SKIPPED rather than opened. Default: 1,
    * so the sizing ladder steps 4 (preferred) → 3 → 2 → 1.
    */
   minContractsPerTrade: number;
@@ -632,7 +632,7 @@ export function getBotConfig(): BotConfig {
     // preferred (4) can apply unless an operator sets an explicit cap.
     maxContractsPerTrade: envInt("BOT_MAX_CONTRACTS_PER_TRADE", 0),
     preferredContractsPerTrade: envInt("BOT_PREFERRED_CONTRACTS_PER_TRADE", 4),
-    minContractsPerTrade: envInt("BOT_MIN_CONTRACTS_PER_TRADE", 2),
+    minContractsPerTrade: envInt("BOT_MIN_CONTRACTS_PER_TRADE", 1),
     // RISK-DEFAULT PATCH: unlimited concurrent positions / trades-per-day were
     // unsafe defaults for a small account. <= 0 still means UNLIMITED if an
     // operator explicitly sets it, but the DEFAULTS are now finite.

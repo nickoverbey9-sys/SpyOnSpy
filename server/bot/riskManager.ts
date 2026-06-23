@@ -223,7 +223,7 @@ export interface SizingDecision {
   cost: number;
   /** Preferred target size (cfg.preferredContractsPerTrade) for this trade. */
   preferred: number;
-  /** Hard minimum size (cfg.minContractsPerTrade, default 2) below which the entry is skipped. */
+  /** Hard minimum size (cfg.minContractsPerTrade, default 1) below which the entry is skipped. */
   minimum: number;
   /**
    * True when the sized quantity is below the preferred target because cash or
@@ -239,7 +239,7 @@ export interface SizingDecision {
  * preference plus the cash + explicit-cap constraints:
  *
  *   • Preference: aim for cfg.preferredContractsPerTrade (default 4). Step down
- *     the ladder (4 → 3 → 2) toward cfg.minContractsPerTrade (default 2, the
+ *     the ladder (4 → 3 → 2 → 1) toward cfg.minContractsPerTrade (default 1, the
  *     hard minimum) when the preferred size cannot be afforded.
  *   • Cash: the position cost (premium × 100 × qty) must fit the working balance
  *     (default cfg.accountStartBalance when no live balance supplied).
@@ -255,8 +255,8 @@ export interface SizingDecision {
  *
  * desired = min(preferred, maxByCash, maxContractsPerTrade-if-finite).
  * If desired >= minimum the entry is allowed at that size; otherwise it is
- * SKIPPED (contracts=0). With defaults (preferred 4, min 2, no explicit cap) the
- * result is 4 when affordable, then 3, then 2 on fallback, or 0 when even 2
+ * SKIPPED (contracts=0). With defaults (preferred 4, min 1, no explicit cap) the
+ * result is 4 when affordable, then 3, 2, 1 on fallback, or 0 when even 1
  * cannot be afforded.
  *
  * Size does not change exit behavior: every position (2, 3 or 4+ contracts) uses
