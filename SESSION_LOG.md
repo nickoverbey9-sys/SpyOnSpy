@@ -4,6 +4,47 @@ Append-only notes on strategy hypotheses and session reviews. Newest entries on 
 
 ---
 
+## 2026-06-22 — RESOLVED: stop-calibration 2×2 backtest (real ThetaData, 15 sessions)
+
+The breakeven/profit-lock hypothesis (logged below) is now tested on REAL data. Ran a
+2×2 sweep — {breakeven+profit-lock ON vs trailing-only} × {A+ gate OFF vs ON} — over
+the same 15 sessions (2026-05-29 → 06-18, $400 start) via `script/backtest-stop-sweep.ts`.
+Output: `backtest-sweep-real/COMPARISON.md`.
+
+| Arm | Trades | Win rate | Net P&L | PF | Avg loss | Max DD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| be+pl, A+ off (CURRENT) | 133 | 64.7% | $10,123 | 5.86 | $45 | $184 |
+| be+pl, A+ on | 95 | 64.2% | $7,084 | 6.19 | $40 | $224 |
+| trail-only, A+ off | 89 | 70.8% | $8,603 | 5.24 | $81 | $336 |
+| trail-only, A+ on | 68 | 69.1% | $4,143 | 3.54 | $78 | $294 |
+
+**Confirmed:** the breakeven stop is 0W/13L by construction (−$284) and profit-lock is a
+net-negative coin flip (19W/15L, −$109). Removing both RAISES win rate 64.7%→70.8% (+6.1pts)
+— the hypothesis below was directionally correct.
+
+**But it is NOT a free lunch:** trailing-only makes ~$1,500 LESS net profit (the protective
+stops were scratching trades that otherwise run to the full −20% hard stop: hard-stops 15→20,
+avg loss $45→$81) and nearly DOUBLES max drawdown ($184→$336). The protective stops trade a
+little win-rate/profit for materially smaller drawdown — worth it on a small account.
+
+**The A+ proximity gate is NOT a win-rate lever** and is net-negative here: it barely moves
+win rate (slightly down) while cutting net profit 30–52%. In this sample the mid-range chases
+it filters were net profitable. Do NOT enable `BOT_APLUS_ENTRY_ONLY`.
+
+**DECISION (operator, 2026-06-22): KEEP CURRENT CONFIG.** Highest net profit + smallest
+drawdown win over the +6pt win-rate gain. No live config changed. `trail-only` (set
+`BOT_BREAKEVEN_ARM_FRACTION=0` + `BOT_PROFIT_LOCK_ARM_FRACTION=0`) remains the documented
+win-rate-max alternative if priorities change. Untested middle ground worth a future arm:
+drop breakeven only (the pure 0/13 loss bucket), keep profit-lock.
+
+**Harness note:** fixed a real bug — `backtest-bot.ts` was not threading the profit-lock
+fractions into `openPaperPosition`, so `BOT_PROFIT_LOCK_ARM_FRACTION` had no effect on any
+prior backtest (it always ran at the hardcoded 0.15/0.05). Now config-authoritative. Also:
+Theta Terminal v3 is now v3-API-only; the loader (`thetaDataLoader.ts`) was already v3-native,
+so no migration was needed — the earlier "v3 migration blocker" was really just terminal setup.
+
+---
+
 ## 2026-06-22 — Stop-calibration hypothesis: breakeven/profit-lock stops suspected net-negative
 
 **Observation (2 OBSERVE sessions, paper):** Across morning (≈−$127) and afternoon (≈+$192), the same pattern held in both:

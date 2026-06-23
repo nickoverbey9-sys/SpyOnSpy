@@ -554,6 +554,13 @@ async function run() {
         trailStartFraction: cfg.trailStartFraction,
         trailGivebackFraction: cfg.trailGivebackFraction,
         breakevenArmFraction: cfg.breakevenArmFraction,
+        // Thread the profit-lock tier through from config. Without these the
+        // backtest fell back to openPaperPosition's hardcoded 0.15/0.05 defaults,
+        // so BOT_PROFIT_LOCK_ARM_FRACTION (e.g. =0 to disable) had no effect on a
+        // run — making any breakeven/profit-lock A/B invalid. Now the env config
+        // is authoritative for the simulation, matching the live engine.
+        profitLockArmFraction: cfg.profitLockArmFraction,
+        profitLockProfitFraction: cfg.profitLockProfitFraction,
       });
       openContract = { strike: actionable.contract.strike, side: actionable.contract.side };
       entryBarIndex = i;
