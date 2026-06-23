@@ -1529,72 +1529,94 @@ check("default contract-quality filters: minOptionPremium 0.15, maxSpreadPct 0.3
   assert.strictEqual(c.maxSpreadPct, 0.30);
 });
 
-// ── Contract sizing ladder (preferred 4 → 3 → 2 → 1, hard minimum 1) ────────────
-console.log("\nContract sizing ladder (preferred=4, fallback 3/2, min=1):");
-check("defaults: preferred=4, min=1, no explicit cap", () => {
+// ── Contract sizing ladder ──────────────────────────────────────────────────────
+// Default is now preferred=2 → 1 (small-account sized). The laddering MECHANICS
+// (step down by risk cap / cash) are still exercised at preferred=4 via cfg4 so
+// the stepping logic stays covered independent of the shipped default.
+console.log("\nContract sizing ladder (default preferred=2, min=1; mechanics tested at 4):");
+const cfg4: BotConfig = { ...getBotConfig(), preferredContractsPerTrade: 4 };
+check("defaults: preferred=2, min=1, no explicit cap", () => {
   const c = getBotConfig();
-  assert.strictEqual(c.preferredContractsPerTrade, 4, "preferred default is 4");
+  assert.strictEqual(c.preferredContractsPerTrade, 2, "preferred default is 2");
   assert.strictEqual(c.minContractsPerTrade, 1, "min default is 1");
   assert.ok(c.maxContractsPerTrade <= 0, "max cap default is unset (no explicit cap)");
 });
-check("sizing chooses 4 when cash allows the preferred size", () => {
+check("default ladder: picks 2 when cash + risk cap allow (premium 0.50)", () => {
+  // premium 0.50 → cost $50/ctr, stop risk $10/ctr (20% stop). 2 ctr = $100 cost,
+  // $20 risk — both within cash ($1326) and the $100 cap → take the preferred 2.
+  const s = sizePosition(0.5, getBotConfig(), 1326.24);
+  assert.strictEqual(s.allowed, true, s.reason);
+  assert.strictEqual(s.contracts, 2, "should buy the preferred 2 contracts");
+  assert.strictEqual(s.fellBackFromPreferred, false);
+  assert.strictEqual(s.projectedStopLoss, 20);
+  assert.match(s.reason, /preferred target/i);
+});
+check("default ladder: falls back to 1 when cash affords only 1 (premium 1.00, $150)", () => {
+  // premium 1.00 → 2 ctr cost $200 > $150; 1 ctr $100 ≤ $150 → step to the min 1.
+  const s = sizePosition(1.0, getBotConfig(), 150);
+  assert.strictEqual(s.allowed, true, s.reason);
+  assert.strictEqual(s.contracts, 1, "should fall back to the minimum 1 contract");
+  assert.strictEqual(s.fellBackFromPreferred, true);
+  assert.match(s.reason, /fallback to 1 contract/i);
+});
+check("mechanics: chooses 4 when cash allows the preferred size", () => {
   // premium 0.50 → cost $50/ctr, stop risk $10/ctr (20% stop). 4 ctr = $200
   // cost (≤ $1326 cash) → prefer 4.
-  const s = sizePosition(0.5, getBotConfig(), 1326.24);
+  const s = sizePosition(0.5, cfg4, 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 4, "should buy preferred 4 contracts");
   assert.strictEqual(s.fellBackFromPreferred, false);
   assert.strictEqual(s.projectedStopLoss, 40);
   assert.match(s.reason, /preferred target/i);
 });
-check("max-loss-per-trade downsizes to fit the $100 cap (premium 1.50 → 3 ctr)", () => {
+check("mechanics: max-loss-per-trade downsizes to fit the $100 cap (premium 1.50 → 3 ctr)", () => {
   // PER-TRADE RISK PATCH (enforceMaxLossPerTrade default on): premium 1.50 →
   // stop risk $30/ctr (20% stop). 4 ctr would risk $120 > the $100 cap, so sizing
   // steps down to 3 ctr ($90 projected stop risk ≤ cap). Cash for 3 ctr = $450 ≤
   // $1326, so the risk cap (not cash) is the binding constraint.
-  const s = sizePosition(1.5, getBotConfig(), 1326.24);
+  const s = sizePosition(1.5, cfg4, 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 3, "downsized to 3 by the per-trade risk cap");
   assert.strictEqual(s.fellBackFromPreferred, true);
   assert.strictEqual(s.projectedStopLoss, 90, "projected stop risk fits the $100 cap");
   assert.match(s.reason, /per-trade risk cap/i);
 });
-check("sizing falls back to 3 when cash cannot afford 4", () => {
+check("mechanics: falls back to 3 when cash cannot afford 4", () => {
   // premium 1.00, cash only $350 → 4 ctr cost $400 > cash; 3 ctr $300 ≤ cash
   // → fall back to 3 (cash-bound only).
-  const s = sizePosition(1.0, getBotConfig(), 350);
+  const s = sizePosition(1.0, cfg4, 350);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 3, "should fall back to 3 contracts on cash");
   assert.strictEqual(s.fellBackFromPreferred, true);
   assert.match(s.reason, /fallback to 3 contract/i);
   assert.match(s.reason, /cash/i);
 });
-check("max-loss-per-trade downsizes to fit the $100 cap (premium 2.00 → 2 ctr)", () => {
+check("mechanics: max-loss-per-trade downsizes to fit the $100 cap (premium 2.00 → 2 ctr)", () => {
   // premium 2.00 → stop risk $40/ctr (20% stop). 4 ctr would risk $160 > the $100
   // cap → step down to 2 ctr ($80 ≤ cap). Cash for 2 ctr = $400 ≤ $1326.
-  const s = sizePosition(2.0, getBotConfig(), 1326.24);
+  const s = sizePosition(2.0, cfg4, 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 2, "downsized to 2 by the per-trade risk cap");
   assert.strictEqual(s.fellBackFromPreferred, true);
   assert.strictEqual(s.projectedStopLoss, 80);
   assert.match(s.reason, /per-trade risk cap/i);
 });
-check("sizing falls back to 2 when cash affords only 2 (not 3 or 4)", () => {
+check("mechanics: falls back to 2 when cash affords only 2 (not 3 or 4)", () => {
   // premium 1.00, cash only $250 → 4 ctr $400 and 3 ctr $300 > cash; 2 ctr $200
   // ≤ $250 → land on 2 (cash-bound only).
-  const s = sizePosition(1.0, getBotConfig(), 250);
+  const s = sizePosition(1.0, cfg4, 250);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 2, "should fall back to 2 contracts on cash");
   assert.strictEqual(s.fellBackFromPreferred, true);
   assert.match(s.reason, /fallback to 2 contract/i);
   assert.match(s.reason, /cash/i);
 });
-check("per-trade risk cap downsizes to the minimum 1 ctr (premium 3.00)", () => {
+check("mechanics: per-trade risk cap downsizes to the minimum 1 ctr (premium 3.00)", () => {
   // premium 3.00 → stop risk $60/ctr (20% stop). 4/3/2 ctr all project > the $100
   // cap; only 1 ctr ($60 ≤ cap) fits. With the hard minimum now 1, the entry is
   // sized to 1 (not skipped) — cash is ample ($1326). The per-trade risk cap is
   // the binding constraint.
-  const s = sizePosition(3.0, getBotConfig(), 1326.24);
+  const s = sizePosition(3.0, cfg4, 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 1, "downsized to the minimum 1 by the per-trade risk cap");
   assert.strictEqual(s.fellBackFromPreferred, true);
@@ -1610,11 +1632,11 @@ check("entry BLOCKED by the per-trade risk cap when even 1 ctr breaches it (prem
   assert.strictEqual(s.contracts, 0);
   assert.match(s.reason, /per-trade risk cap/i);
 });
-check("sizing falls back to the minimum 1 when cash affords only 1 (premium 1.00, $150)", () => {
+check("mechanics: falls back from 4 all the way to 1 on cash (premium 1.00, $150)", () => {
   // premium 1.00, cash only $150 → 4/3/2 ctr cost $400/$300/$200 > $150; 1 ctr
-  // $100 ≤ $150 → land on the hard minimum of 1 (cash-bound). With min now 1 this
-  // opens rather than skipping.
-  const s = sizePosition(1.0, getBotConfig(), 150);
+  // $100 ≤ $150 → land on the hard minimum of 1 (cash-bound), stepping past every
+  // rung of the preferred-4 ladder.
+  const s = sizePosition(1.0, cfg4, 150);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 1, "should fall back to the minimum 1 contract on cash");
   assert.strictEqual(s.fellBackFromPreferred, true);
@@ -1631,7 +1653,7 @@ check("entry BLOCKED when cash cannot afford even 1 contract (premium 1.00, $50)
 });
 check("finite maxContractsPerTrade=3 caps preferred 4 down to 3", () => {
   // Explicit cap of 3 forces three contracts even though 4 is affordable.
-  const cfgCap: BotConfig = { ...getBotConfig(), maxContractsPerTrade: 3 };
+  const cfgCap: BotConfig = { ...cfg4, maxContractsPerTrade: 3 };
   const s = sizePosition(0.5, cfgCap, 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 3, "capped to 3 by max-per-trade cap");
@@ -1640,7 +1662,7 @@ check("finite maxContractsPerTrade=3 caps preferred 4 down to 3", () => {
   assert.match(s.reason, /max-per-trade cap/i);
 });
 check("explicit caps at or above preferred are safe (cap=4 honors preferred 4)", () => {
-  const cfgCap: BotConfig = { ...getBotConfig(), maxContractsPerTrade: 4 };
+  const cfgCap: BotConfig = { ...cfg4, maxContractsPerTrade: 4 };
   const s = sizePosition(0.5, cfgCap, 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 4, "cap=4 still allows the preferred 4");
@@ -1657,7 +1679,9 @@ check("larger preferred honored when cash allows it", () => {
 check("per-trade risk cap downsizes to 3 ctr when projected loss would exceed the cap, AND the -20% hard stop still fires on it", () => {
   // premium 1.50, stop 20% → $30/ctr stop risk. 4 ctr ($120) breaches the $100
   // cap, so sizing steps down to 3 ctr ($90 ≤ cap) with ample cash ($1326).
-  const cfg = getBotConfig();
+  // Pinned to preferred=4 to exercise the downsizing ladder (the shipped default
+  // is now 2, which would land on 2 here without the step-down under test).
+  const cfg: BotConfig = { ...getBotConfig(), preferredContractsPerTrade: 4 };
   const sizing = sizePosition(1.5, cfg, 1326.24);
   assert.strictEqual(sizing.allowed, true, sizing.reason);
   assert.strictEqual(sizing.contracts, 3, "downsized to 3 by the per-trade risk cap");

@@ -210,15 +210,15 @@ export interface BotConfig {
   maxContractsPerTrade: number;
   /**
    * Preferred contracts to buy per trade when cash and the per-trade loss cap
-   * allow it. Default: 4. Steps down the ladder (4 → 3 → 2) toward
-   * minContractsPerTrade when the preferred size cannot be afforded or would
-   * breach the per-trade loss cap.
+   * allow it. Default: 2 (sized for a small account). Steps down the ladder
+   * (2 → 1) toward minContractsPerTrade when the preferred size cannot be
+   * afforded or would breach the per-trade loss cap.
    */
   preferredContractsPerTrade: number;
   /**
    * Hard minimum contracts per trade. If the largest affordable / risk-safe
    * size is below this, the entry is SKIPPED rather than opened. Default: 1,
-   * so the sizing ladder steps 4 (preferred) → 3 → 2 → 1.
+   * so the sizing ladder steps 2 (preferred) → 1.
    */
   minContractsPerTrade: number;
   /** Max concurrent open positions. <= 0 means UNLIMITED. Default: 2 (risk-default patch). */
@@ -631,7 +631,7 @@ export function getBotConfig(): BotConfig {
     // by preferred size, cash, and per-trade risk instead. Default 0 so the
     // preferred (4) can apply unless an operator sets an explicit cap.
     maxContractsPerTrade: envInt("BOT_MAX_CONTRACTS_PER_TRADE", 0),
-    preferredContractsPerTrade: envInt("BOT_PREFERRED_CONTRACTS_PER_TRADE", 4),
+    preferredContractsPerTrade: envInt("BOT_PREFERRED_CONTRACTS_PER_TRADE", 2),
     minContractsPerTrade: envInt("BOT_MIN_CONTRACTS_PER_TRADE", 1),
     // RISK-DEFAULT PATCH: unlimited concurrent positions / trades-per-day were
     // unsafe defaults for a small account. <= 0 still means UNLIMITED if an

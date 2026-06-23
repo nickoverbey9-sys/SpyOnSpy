@@ -238,9 +238,9 @@ export interface SizingDecision {
  * Size a new position for the given entry premium under the operator's sizing
  * preference plus the cash + explicit-cap constraints:
  *
- *   • Preference: aim for cfg.preferredContractsPerTrade (default 4). Step down
- *     the ladder (4 → 3 → 2 → 1) toward cfg.minContractsPerTrade (default 1, the
- *     hard minimum) when the preferred size cannot be afforded.
+ *   • Preference: aim for cfg.preferredContractsPerTrade (default 2, small-account
+ *     sized). Step down the ladder (2 → 1) toward cfg.minContractsPerTrade
+ *     (default 1, the hard minimum) when the preferred size cannot be afforded.
  *   • Cash: the position cost (premium × 100 × qty) must fit the working balance
  *     (default cfg.accountStartBalance when no live balance supplied).
  *   • Explicit cap: when cfg.maxContractsPerTrade is finite (> 0) it caps the
@@ -255,11 +255,11 @@ export interface SizingDecision {
  *
  * desired = min(preferred, maxByCash, maxContractsPerTrade-if-finite).
  * If desired >= minimum the entry is allowed at that size; otherwise it is
- * SKIPPED (contracts=0). With defaults (preferred 4, min 1, no explicit cap) the
- * result is 4 when affordable, then 3, 2, 1 on fallback, or 0 when even 1
- * cannot be afforded.
+ * SKIPPED (contracts=0). With defaults (preferred 2, min 1, no explicit cap) the
+ * result is 2 when affordable, then 1 on fallback, or 0 when even 1 cannot be
+ * afforded.
  *
- * Size does not change exit behavior: every position (2, 3 or 4+ contracts) uses
+ * Size does not change exit behavior: every position (1 or 2+ contracts) uses
  * the same no-trim runner exit — hard stop, +35% arm / 5% give-back trailing
  * stop, and flatten/invalidation (see evaluatePosition).
  */
