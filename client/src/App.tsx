@@ -3594,9 +3594,6 @@ function Dashboard() {
             </div>
             <div className="hidden lg:block">
               <h1 className="text-xl font-semibold tracking-tight">SPY 0DTE command center</h1>
-              <p className="text-sm text-muted-foreground">
-                Live-updating price, flow, macro, sentiment, and setup analysis
-              </p>
             </div>
             <div className="flex items-center gap-2">
               <Badge

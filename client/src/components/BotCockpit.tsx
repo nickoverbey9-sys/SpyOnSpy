@@ -548,14 +548,14 @@ export default function BotCockpit({ snapshot }: { snapshot: any }) {
           <AccountBalance data={account.data} />
           <AutomateTrades positions={positions.data} auto={automation.data} />
         </div>
+        <div className="ck-row ck-row-live">
+          <SpyChart snapshot={snapshot} />
+          <LiveActivity auto={automation.data} fills={fills.data} />
+        </div>
         <div className="ck-row ck-row-trips">
           <AutotradeReadiness status={status.data} />
           <AutomationActivity auto={automation.data} />
           <LiveSignals data={signals.data} />
-        </div>
-        <div className="ck-row ck-row-live">
-          <SpyChart snapshot={snapshot} />
-          <LiveActivity auto={automation.data} fills={fills.data} />
         </div>
         <div className="ck-row ck-row-score">
           <DailyScorecard data={scorecard.data} />
