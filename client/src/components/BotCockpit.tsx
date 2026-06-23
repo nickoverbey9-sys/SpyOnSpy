@@ -264,13 +264,24 @@ function LiveSignals({ data }: { data: any }) {
   );
 }
 
-// ── SPY 5m candlestick chart ─────────────────────────────────────────────────
+// ── SPY price map · 5m candles ───────────────────────────────────────────────
+// Overlay palette (kept here so the legend, lines, and tooltip stay in sync).
+const C_VWAP = "#e879c7"; // pink
+const C_EMA = "#f0883e"; // orange
+const C_DOPEN = "var(--warn)"; // yellow — daily open
+const C_PMH = "var(--accent)"; // blue — premarket high
+const C_PML = "#a78bfa"; // purple — premarket low
+const C_LAST = "var(--up)"; // green — last price
+
 function SpyChart({ snapshot }: { snapshot: any }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(680);
-  const h = 300;
+  const [hover, setHover] = useState<number | null>(null);
+  const priceH = 300,
+    macdH = 120,
+    willH = 120;
   const padL = 8,
-    padR = 52,
+    padR = 56,
     padT = 14,
     padB = 22;
 
@@ -283,7 +294,8 @@ function SpyChart({ snapshot }: { snapshot: any }) {
     return () => ro.disconnect();
   }, []);
 
-  const raw: any[] = snapshot?.spy?.candles5m ?? [];
+  const spy = snapshot?.spy ?? {};
+  const raw: any[] = spy.candles5m ?? [];
   const candles = raw
     .map((c) => ({
       t: c.label ?? "",
@@ -291,78 +303,268 @@ function SpyChart({ snapshot }: { snapshot: any }) {
       h: num(c.high),
       l: num(c.low),
       c: num(c.close),
+      vwap: num(c.vwap, NaN),
+      ema: num(c.ema200, NaN),
+      macd: num(c.macd, NaN),
+      signal: num(c.signal, NaN),
+      hist: num(c.histogram, NaN),
+      will: num(c.williamsR, NaN),
+      liqIn: num(c.liquidityIn),
+      liqOut: num(c.liquidityOut),
     }))
     .filter((c) => c.h > 0);
 
   if (candles.length < 2) {
     return (
-      <Panel label="SPY · 5m" flush>
+      <section className="ck-panel">
+        <div className="ck-panel-rail" />
         <div className="ck-empty" style={{ padding: 32 }}>
           Waiting for candles…
         </div>
-      </Panel>
+      </section>
     );
   }
 
-  const lo = Math.min(...candles.map((c) => c.l));
-  const hi = Math.max(...candles.map((c) => c.h));
+  const dailyOpen = num(spy.dailyOpen, NaN);
+  const pmHigh = num(spy.premarketHigh, NaN);
+  const pmLow = num(spy.premarketLow, NaN);
+  const lastC = candles[candles.length - 1];
+  const lastPrice = num(spy.price, lastC.c);
+  const change = num(spy.change, lastPrice - candles[0].o);
+  const changePct = num(spy.changePercent, candles[0].o ? (change / candles[0].o) * 100 : 0);
+  const up = change >= 0;
+
+  const n = candles.length;
+  const plotW = w - padL - padR;
+  const step = plotW / n;
+  const bw = Math.max(2, step * 0.6);
+  const x = (i: number) => padL + step * i + step / 2;
+
+  // Price range includes the reference levels so their lines stay on-screen.
+  const refs = [pmHigh, pmLow, dailyOpen, lastPrice].filter((v) => Number.isFinite(v));
+  const lo = Math.min(...candles.map((c) => c.l), ...refs);
+  const hi = Math.max(...candles.map((c) => c.h), ...refs);
   const pad = (hi - lo) * 0.08 || 0.5;
   const yMin = lo - pad,
     yMax = hi + pad;
+  const yP = (price: number) =>
+    padT + (1 - (price - yMin) / (yMax - yMin)) * (priceH - padT - padB);
 
-  const plotW = w - padL - padR;
-  const plotH = h - padT - padB;
-  const n = candles.length;
-  const step = plotW / n;
-  const bw = Math.max(2, step * 0.62);
+  // Buyer/Seller step-in: derive a support (deepest low → buyers stepped in) and
+  // a resistance (highest high → sellers stepped in). Heuristic — refine later.
+  const buyIdx = candles.reduce((b, c, i) => (c.l < candles[b].l ? i : b), 0);
+  const sellIdx = candles.reduce((b, c, i) => (c.h > candles[b].h ? i : b), 0);
+  const buyStepIn = candles[buyIdx].l;
+  const sellStepIn = candles[sellIdx].h;
 
-  const x = (i: number) => padL + step * i + step / 2;
-  const y = (price: number) => padT + (1 - (price - yMin) / (yMax - yMin)) * plotH;
+  const poly = (sel: (c: (typeof candles)[number]) => number, yfn: (v: number) => number) =>
+    candles
+      .map((c, i) => (Number.isFinite(sel(c)) ? `${x(i).toFixed(1)},${yfn(sel(c)).toFixed(1)}` : null))
+      .filter(Boolean)
+      .join(" ");
 
-  const last = candles[candles.length - 1];
-  const up = last.c >= candles[0].o;
+  // MACD geometry (zero-centered).
+  const macdVals = candles.flatMap((c) =>
+    [c.macd, c.signal, c.hist].filter((v) => Number.isFinite(v)),
+  );
+  const mAbs = Math.max(0.01, ...macdVals.map((v) => Math.abs(v)));
+  const yM = (v: number) => padT + (1 - (v + mAbs) / (2 * mAbs)) * (macdH - padT - padB);
+
+  // Williams %R geometry (fixed 0 … -100).
+  const yW = (v: number) => padT + (1 - (v + 100) / 100) * (willH - padT - padB);
 
   const ticks = 4;
   const tickVals = Array.from({ length: ticks + 1 }, (_, i) => yMin + ((yMax - yMin) * i) / ticks);
+  const xLabelIdx = Array.from({ length: Math.min(5, n) }, (_, k) =>
+    Math.round((k * (n - 1)) / Math.min(4, n - 1)),
+  );
+
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * w;
+    const idx = Math.max(0, Math.min(n - 1, Math.floor((mx - padL) / step)));
+    setHover(idx);
+  };
+  const hc = hover != null ? candles[hover] : null;
 
   return (
-    <Panel label="SPY · 5m" flush>
-      <div className="ck-chart-head">
-        <span className="ck-chart-last">${last.c.toFixed(2)}</span>
-        <span className="ck-chart-sub" style={{ color: up ? "var(--up)" : "var(--down)" }}>
-          {up ? "▲" : "▼"} session {up ? "+" : ""}
-          {(last.c - candles[0].o).toFixed(2)}
-        </span>
-        <span className="ck-chart-rth">RTH · 5-min</span>
-      </div>
+    <section className="ck-panel ck-pricemap">
+      <div className="ck-panel-rail" />
+      <header className="ck-pm-head">
+        <div className="ck-pm-titles">
+          <div className="ck-pm-title">
+            <span className="ck-pm-ico">▦</span> SPY price map · 5m candles
+          </div>
+          <div className="ck-pm-sub">
+            5m OHLC, VWAP, MACD, Williams %R, 200 EMA, daily open, premarket range, last price
+          </div>
+        </div>
+        <div className="ck-pm-quote">
+          <div className="ck-pm-price">${lastPrice.toFixed(2)}</div>
+          <div className="ck-pm-chg" style={{ color: up ? "var(--up)" : "var(--down)" }}>
+            {up ? "+" : ""}
+            {change.toFixed(2)} / {up ? "+" : ""}
+            {changePct.toFixed(2)}%
+          </div>
+        </div>
+      </header>
+
       <div className="ck-chart-wrap" ref={wrapRef}>
-        <svg width={w} height={h} className="ck-chart-svg" role="img" aria-label="SPY 5 minute candlestick chart">
+        {/* ── Price panel ──────────────────────────────────────────────── */}
+        <svg
+          width={w}
+          height={priceH}
+          className="ck-chart-svg"
+          role="img"
+          aria-label="SPY 5 minute price map"
+          onMouseMove={onMove}
+          onMouseLeave={() => setHover(null)}
+        >
           {tickVals.map((v, i) => (
             <g key={i}>
-              <line x1={padL} x2={padL + plotW} y1={y(v)} y2={y(v)} className="ck-grid-line" />
-              <text x={padL + plotW + 6} y={y(v) + 3} className="ck-axis-text">
+              <line x1={padL} x2={padL + plotW} y1={yP(v)} y2={yP(v)} className="ck-grid-line" />
+              <text x={padL + plotW + 6} y={yP(v) + 3} className="ck-axis-text">
                 {v.toFixed(2)}
               </text>
             </g>
           ))}
+
+          {/* reference levels */}
+          {Number.isFinite(dailyOpen) && (
+            <line x1={padL} x2={padL + plotW} y1={yP(dailyOpen)} y2={yP(dailyOpen)} className="ck-ref" stroke={C_DOPEN} />
+          )}
+          {Number.isFinite(pmHigh) && (
+            <line x1={padL} x2={padL + plotW} y1={yP(pmHigh)} y2={yP(pmHigh)} className="ck-ref" stroke={C_PMH} />
+          )}
+          {Number.isFinite(pmLow) && (
+            <line x1={padL} x2={padL + plotW} y1={yP(pmLow)} y2={yP(pmLow)} className="ck-ref" stroke={C_PML} />
+          )}
+          <line x1={padL} x2={padL + plotW} y1={yP(lastPrice)} y2={yP(lastPrice)} className="ck-ref ck-ref-last" stroke={C_LAST} />
+
+          {/* candles */}
           {candles.map((c, i) => {
             const green = c.c >= c.o;
             const col = green ? "var(--up)" : "var(--down)";
-            const yO = y(c.o),
-              yC = y(c.c);
+            const yO = yP(c.o),
+              yC = yP(c.c);
             const top = Math.min(yO, yC);
             const bodyH = Math.max(1, Math.abs(yC - yO));
             return (
               <g key={i}>
-                <line x1={x(i)} x2={x(i)} y1={y(c.h)} y2={y(c.l)} stroke={col} strokeWidth="1" />
-                <rect x={x(i) - bw / 2} y={top} width={bw} height={bodyH} fill={col} opacity={green ? 0.9 : 0.85} />
+                <line x1={x(i)} x2={x(i)} y1={yP(c.h)} y2={yP(c.l)} stroke={col} strokeWidth="1" />
+                <rect x={x(i) - bw / 2} y={top} width={bw} height={bodyH} fill={col} opacity={green ? 0.92 : 0.85} />
               </g>
             );
           })}
-          <line x1={padL} x2={padL + plotW} y1={y(last.c)} y2={y(last.c)} className="ck-last-line" />
+
+          {/* VWAP + 200 EMA overlays */}
+          <polyline points={poly((c) => c.vwap, yP)} fill="none" stroke={C_VWAP} strokeWidth="1.5" opacity="0.95" />
+          <polyline points={poly((c) => c.ema, yP)} fill="none" stroke={C_EMA} strokeWidth="1.5" opacity="0.95" />
+
+          {/* step-in markers */}
+          <g>
+            <circle cx={x(buyIdx)} cy={yP(buyStepIn)} r="4" fill="var(--up)" />
+            <text x={x(buyIdx)} y={yP(buyStepIn) + 16} className="ck-pm-mark" fill="var(--up)" textAnchor="middle">
+              Buyers
+            </text>
+          </g>
+          <g>
+            <circle cx={x(sellIdx)} cy={yP(sellStepIn)} r="4" fill="var(--down)" />
+            <text x={x(sellIdx)} y={yP(sellStepIn) - 8} className="ck-pm-mark" fill="var(--down)" textAnchor="middle">
+              Sellers
+            </text>
+          </g>
+
+          {/* crosshair */}
+          {hc && <line x1={x(hover!)} x2={x(hover!)} y1={padT} y2={priceH - padB} className="ck-cross" />}
+        </svg>
+
+        {/* hover tooltip */}
+        {hc && (
+          <div
+            className="ck-pm-tip"
+            style={{
+              left: Math.min(Math.max(8, x(hover!) - 70), Math.max(8, w - 200)),
+            }}
+          >
+            <div className="ck-pm-tip-t">{hc.t}</div>
+            <div className="ck-pm-tip-r">
+              O {hc.o.toFixed(2)} · H {hc.h.toFixed(2)} · L {hc.l.toFixed(2)} · C {hc.c.toFixed(2)}
+            </div>
+            {Number.isFinite(hc.vwap) && (
+              <div className="ck-pm-tip-r" style={{ color: C_VWAP }}>
+                VWAP {hc.vwap.toFixed(2)}
+              </div>
+            )}
+            {Number.isFinite(hc.ema) && (
+              <div className="ck-pm-tip-r" style={{ color: C_EMA }}>
+                200 EMA {hc.ema.toFixed(2)}
+              </div>
+            )}
+            <div className="ck-pm-tip-r" style={{ color: "var(--ink-dim)" }}>
+              BUY / SELL STEP-IN {buyStepIn.toFixed(2)} / {sellStepIn.toFixed(2)}
+            </div>
+          </div>
+        )}
+
+        {/* ── MACD panel ───────────────────────────────────────────────── */}
+        <div className="ck-sub-head">
+          <span>MACD</span>
+          <span className="ck-sub-tag">Histogram + signal</span>
+        </div>
+        <svg width={w} height={macdH} className="ck-chart-svg" role="img" aria-label="MACD">
+          <line x1={padL} x2={padL + plotW} y1={yM(0)} y2={yM(0)} className="ck-grid-line" />
+          {candles.map((c, i) =>
+            Number.isFinite(c.hist) ? (
+              <rect
+                key={i}
+                x={x(i) - bw / 2}
+                y={Math.min(yM(0), yM(c.hist))}
+                width={bw}
+                height={Math.max(1, Math.abs(yM(c.hist) - yM(0)))}
+                fill={c.hist >= 0 ? "var(--up)" : "var(--down)"}
+                opacity="0.7"
+              />
+            ) : null,
+          )}
+          <polyline points={poly((c) => c.macd, yM)} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
+          <polyline points={poly((c) => c.signal, yM)} fill="none" stroke={C_EMA} strokeWidth="1.5" />
+        </svg>
+
+        {/* ── Williams %R panel ────────────────────────────────────────── */}
+        <div className="ck-sub-head">
+          <span>Williams %R</span>
+          <span className="ck-sub-tag">14-period pressure</span>
+        </div>
+        <svg width={w} height={willH} className="ck-chart-svg" role="img" aria-label="Williams %R">
+          {[-20, -80].map((lvl) => (
+            <g key={lvl}>
+              <line x1={padL} x2={padL + plotW} y1={yW(lvl)} y2={yW(lvl)} className="ck-ref" stroke="var(--ink-faint)" opacity="0.5" />
+              <text x={padL + plotW + 6} y={yW(lvl) + 3} className="ck-axis-text">
+                {lvl}
+              </text>
+            </g>
+          ))}
+          <polyline points={poly((c) => c.will, yW)} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
+          {/* x-axis time labels */}
+          {xLabelIdx.map((i) => (
+            <text key={i} x={x(i)} y={willH - 6} className="ck-axis-text" textAnchor="middle">
+              {candles[i].t}
+            </text>
+          ))}
         </svg>
       </div>
-    </Panel>
+
+      {/* legend */}
+      <div className="ck-pm-legend">
+        <span className="ck-lg"><i style={{ background: C_DOPEN }} />Daily open ${Number.isFinite(dailyOpen) ? dailyOpen.toFixed(2) : "--"}</span>
+        <span className="ck-lg"><i style={{ background: C_PMH }} />Premarket high ${Number.isFinite(pmHigh) ? pmHigh.toFixed(2) : "--"}</span>
+        <span className="ck-lg"><i style={{ background: C_PML }} />Premarket low ${Number.isFinite(pmLow) ? pmLow.toFixed(2) : "--"}</span>
+        <span className="ck-lg"><i style={{ background: C_LAST }} />Last ${lastPrice.toFixed(2)}</span>
+        <span className="ck-lg"><i style={{ background: C_VWAP }} />VWAP</span>
+        <span className="ck-lg"><i style={{ background: C_EMA }} />200 EMA</span>
+      </div>
+    </section>
   );
 }
 
@@ -685,6 +887,30 @@ const CSS = `
 .ck-grid-line{stroke:var(--line-soft);stroke-width:1}
 .ck-axis-text{fill:var(--ink-faint);font-size:9px;font-family:var(--mono)}
 .ck-last-line{stroke:var(--accent);stroke-width:1;stroke-dasharray:3 3;opacity:.5}
+
+/* ── SPY price map ── */
+.ck-pm-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:14px 16px;border-bottom:1px solid var(--line-soft);background:var(--panel-2)}
+.ck-pm-titles{min-width:0}
+.ck-pm-title{font-size:14px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:7px}
+.ck-pm-ico{color:var(--accent)}
+.ck-pm-sub{font-size:11px;color:var(--ink-faint);margin-top:4px;line-height:1.4}
+.ck-pm-quote{text-align:right;flex-shrink:0}
+.ck-pm-price{font-size:22px;font-weight:700;letter-spacing:-.01em;line-height:1}
+.ck-pm-chg{font-size:12px;font-weight:600;margin-top:3px}
+.ck-pm-mark{font-size:9px;font-weight:700;font-family:var(--mono)}
+.ck-ref{stroke-width:1;stroke-dasharray:4 4;opacity:.7}
+.ck-ref-last{stroke-dasharray:none;opacity:.55}
+.ck-cross{stroke:var(--ink-faint);stroke-width:1;stroke-dasharray:2 3;opacity:.6}
+.ck-chart-wrap{position:relative}
+.ck-pm-tip{position:absolute;top:46px;pointer-events:none;background:rgba(15,20,28,.96);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;font-family:var(--mono);box-shadow:0 6px 20px rgba(0,0,0,.45);z-index:5;white-space:nowrap}
+.ck-pm-tip-t{font-weight:700;margin-bottom:4px}
+.ck-pm-tip-r{color:var(--ink-dim);line-height:1.5}
+.ck-sub-head{display:flex;align-items:baseline;justify-content:space-between;padding:8px 16px 2px;border-top:1px solid var(--line-soft)}
+.ck-sub-head>span:first-child{font-size:11px;font-weight:700;letter-spacing:.06em}
+.ck-sub-tag{font-size:10px;color:var(--ink-faint)}
+.ck-pm-legend{display:flex;flex-wrap:wrap;gap:14px;padding:11px 16px;border-top:1px solid var(--line-soft);background:var(--panel-2)}
+.ck-lg{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-dim)}
+.ck-lg>i{width:12px;height:3px;border-radius:2px;display:inline-block}
 
 .ck-feed{max-height:336px;overflow:auto}
 .ck-feed-row{display:grid;grid-template-columns:72px 80px 1fr;gap:12px;align-items:baseline;padding:10px 16px;border-bottom:1px solid var(--line-soft);font-size:12px}
