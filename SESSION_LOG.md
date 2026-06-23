@@ -4,6 +4,33 @@ Append-only notes on strategy hypotheses and session reviews. Newest entries on 
 
 ---
 
+## 2026-06-22 — REJECTED: post-hard-stop same-direction entry cooldown
+
+Ported the parallel build's `BOT_HARD_STOP_DIRECTION_COOLDOWN_SEC` idea (after a −20%
+hard stop, pause same-side new entries for N sec) and backtested it on the same 15 real
+sessions ($400 start). **It does not help — neutral-to-negative:**
+
+| Cooldown | Trades | Win rate | Net P&L | PF | Hard stops | CD blocks |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| off (current) | 133 | 64.7% | $10,123 | 5.86 | 15 (−$1,431) | 0 |
+| 300s | 133 | 63.9% | $9,895 | 5.54 | 16 (−$1,527) | 4 |
+| 600s | 129 | 63.6% | $8,777 | 5.21 | 15 (−$1,431) | 19 |
+
+**Why it failed:** (1) the pattern is rare — at 300s the cooldown fired only 4× in 15
+sessions; same-side hard stops almost never cluster within minutes. (2) When it did block
+(600s), it removed *profitable* re-entries — after a hard stop the MTF gate re-qualifies the
+setup and those continuations mostly run. The existing 30m+15m alignment gate already vets
+re-entries, so a blunt time cooldown only sits out winners. Hard-stop count never even
+dropped (path-dependency relocates them).
+
+**Decision: do NOT deploy. Code reverted** (kept repo clean); default would have been 0/off
+anyway. NOT ruled out: the CHOP-GATED variant (`BOT_HARD_STOP_CHOP_COOLDOWN_SEC` — cool down
+only in choppy regime) is a different mechanism and untested. Lesson: a plausible idea from
+the friend's higher-win-rate playbook was net-negative on THIS architecture — backtest every
+ported mechanism on real data before believing it.
+
+---
+
 ## 2026-06-22 — RESOLVED: stop-calibration 2×2 backtest (real ThetaData, 15 sessions)
 
 The breakeven/profit-lock hypothesis (logged below) is now tested on REAL data. Ran a
