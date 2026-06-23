@@ -26,7 +26,9 @@ import {
   isTerminalOrderStatus,
   waitForFill,
   selectMarkFromQuote,
+  countDayTrades,
 } from "../server/bot/tradierAdapter.js";
+import type { TradierOrderLike } from "../server/bot/tradierAdapter.js";
 import {
   getBotConfig,
   getAutoTradeReadiness,
@@ -3228,6 +3230,94 @@ check("mark fallback: negative/non-finite values are never used as a mark", () =
 check("mark fallback: no positive source anywhere → null (caller fails safe, holds)", () => {
   assert.strictEqual(selectMarkFromQuote({ bid: 0, ask: 0, mid: 0, last: 0 }), null);
   assert.strictEqual(selectMarkFromQuote({ bid: null, ask: null, mid: null, last: null }), null);
+});
+
+// ── PDT day-trade counting (broker-authoritative, sub-$25k margin) ──────────────
+// countDayTrades derives the rolling 5-business-day day-trade count from Tradier
+// order history (restart-safe, since Render's local .data/ is ephemeral). A day
+// trade = a same-day option open+close round trip; today's still-open positions
+// count too (a 0DTE open becomes a day trade this session). Pure + network-free.
+console.log("\nPDT day-trade counting (Patch: broker-authoritative):");
+
+// Fixed "now" = Tue 2026-06-23 13:00 ET. Window business days (incl. today):
+// 06-23 Tue, 06-22 Mon, 06-19 Fri, 06-18 Thu, 06-17 Wed (weekend 06-20/21 skipped).
+const PDT_NOW = new Date("2026-06-23T17:00:00Z");
+const ord = (
+  dateNy: string,
+  sym: string,
+  side: "buy_to_open" | "sell_to_close",
+  status = "filled",
+): TradierOrderLike => ({
+  status,
+  side,
+  class: "option",
+  option_symbol: sym,
+  // 14:30Z ≈ 10:30 ET — safely the same NY date as `dateNy`.
+  transaction_date: `${dateNy}T14:30:00Z`,
+});
+
+check("PDT: no orders → 0 day trades", () => {
+  assert.deepStrictEqual(countDayTrades([], PDT_NOW), { count: 0, dates: [] });
+});
+
+check("PDT: a same-day round trip today counts as 1", () => {
+  const r = countDayTrades([
+    ord("2026-06-23", "SPY260623C00600000", "buy_to_open"),
+    ord("2026-06-23", "SPY260623C00600000", "sell_to_close"),
+  ], PDT_NOW);
+  assert.strictEqual(r.count, 1);
+  assert.deepStrictEqual(r.dates, ["2026-06-23"]);
+});
+
+check("PDT: today's still-open position (no close yet) counts as a pending day trade", () => {
+  const r = countDayTrades([ord("2026-06-23", "SPY260623P00590000", "buy_to_open")], PDT_NOW);
+  assert.strictEqual(r.count, 1, "a 0DTE open today will become a day trade this session");
+});
+
+check("PDT: an OPEN-only on a PRIOR day is NOT a day trade (never closed that day)", () => {
+  const r = countDayTrades([ord("2026-06-22", "SPY260622C00600000", "buy_to_open")], PDT_NOW);
+  assert.strictEqual(r.count, 0);
+});
+
+check("PDT: three round trips across three prior business days → 3 (the 4th must block)", () => {
+  const r = countDayTrades([
+    ord("2026-06-22", "SPY260622C00600000", "buy_to_open"),
+    ord("2026-06-22", "SPY260622C00600000", "sell_to_close"),
+    ord("2026-06-19", "SPY260619P00595000", "buy_to_open"),
+    ord("2026-06-19", "SPY260619P00595000", "sell_to_close"),
+    ord("2026-06-18", "SPY260618C00601000", "buy_to_open"),
+    ord("2026-06-18", "SPY260618C00601000", "sell_to_close"),
+  ], PDT_NOW);
+  assert.strictEqual(r.count, 3, "at 3 in the window the guard blocks the next entry");
+  assert.deepStrictEqual(r.dates, ["2026-06-18", "2026-06-19", "2026-06-22"]);
+});
+
+check("PDT: two round trips of the same symbol on the same day count as 2", () => {
+  const r = countDayTrades([
+    ord("2026-06-23", "SPY260623C00600000", "buy_to_open"),
+    ord("2026-06-23", "SPY260623C00600000", "sell_to_close"),
+    ord("2026-06-23", "SPY260623C00600000", "buy_to_open"),
+    ord("2026-06-23", "SPY260623C00600000", "sell_to_close"),
+  ], PDT_NOW);
+  assert.strictEqual(r.count, 2);
+});
+
+check("PDT: a round trip OUTSIDE the 5-business-day window is excluded", () => {
+  // 06-16 (Tue) is the 6th business day back — beyond the window of 5.
+  const r = countDayTrades([
+    ord("2026-06-16", "SPY260616C00600000", "buy_to_open"),
+    ord("2026-06-16", "SPY260616C00600000", "sell_to_close"),
+  ], PDT_NOW);
+  assert.strictEqual(r.count, 0, "older than 5 business days must not count");
+});
+
+check("PDT: non-filled and non-option orders are ignored", () => {
+  const r = countDayTrades([
+    ord("2026-06-23", "SPY260623C00600000", "buy_to_open", "canceled"),
+    ord("2026-06-23", "SPY260623C00600000", "sell_to_close", "rejected"),
+    { status: "filled", side: "buy", class: "equity", symbol: "SPY", transaction_date: "2026-06-23T14:30:00Z" },
+  ], PDT_NOW);
+  assert.strictEqual(r.count, 0);
 });
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

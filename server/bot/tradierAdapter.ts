@@ -718,3 +718,153 @@ export async function waitForFill(
     execQuantity: last?.execQuantity ?? null,
   };
 }
+
+// ─── PDT day-trade counting (broker-authoritative; sub-$25k margin guard) ──────
+//
+// Render's filesystem is ephemeral (no persistent disk), so a locally-persisted
+// day-trade counter resets on every redeploy. The only restart-safe source of
+// truth is the broker, so the rolling 5-business-day day-trade count is derived
+// from Tradier's order history instead of a local file.
+
+/** Minimal shape of a Tradier order row needed to count day trades. */
+export interface TradierOrderLike {
+  status?: string;
+  side?: string;
+  class?: string;
+  option_symbol?: string;
+  symbol?: string;
+  create_date?: string;
+  transaction_date?: string;
+}
+
+export interface DayTradeCount {
+  /** True when the count came from a live Tradier order-history call. */
+  available: boolean;
+  /**
+   * Same-day option round trips ("day trades") in the rolling window, INCLUDING
+   * today's still-open positions (each 0DTE open becomes a day trade this
+   * session). This is the number that gates the PDT guard.
+   */
+  count: number;
+  /** NY dates (YYYY-MM-DD) that contributed, for visibility. */
+  dates: string[];
+  reason: string | null;
+}
+
+/** Tradier order statuses that represent an executed (counting) fill. */
+const FILLED_ORDER_STATUSES = new Set(["filled", "partially_filled"]);
+
+/**
+ * Count same-day option round trips ("day trades") from a list of Tradier orders
+ * over the last `windowBusinessDays` NY business days (inclusive of today). Pure
+ * and network-free so the policy is unit-tested directly.
+ *
+ * A day trade = an opening fill (buy_*) and a closing fill (sell_*) of the same
+ * option symbol on the same NY trading date. Prior days count only COMPLETED
+ * round trips; for TODAY an opening fill with no matching close yet is also
+ * counted, because a 0DTE position is closed the same session — so the result
+ * reflects the day trades that WILL exist today, not just the settled ones.
+ *
+ * Weekends are skipped. Market holidays are NOT modeled, so the window may be
+ * marginally wider than the true 5 trading days — that is conservative (it never
+ * under-counts a real trading day) and there are no fills on a holiday anyway.
+ */
+export function countDayTrades(
+  orders: TradierOrderLike[],
+  now: Date = new Date(),
+  windowBusinessDays = 5,
+): { count: number; dates: string[] } {
+  // The set of NY business dates in the rolling window (today + prior business days).
+  const windowDates = new Set<string>();
+  let cursor = new Date(now);
+  let safety = 0;
+  while (windowDates.size < windowBusinessDays && safety < 40) {
+    const d = marketDateNY(cursor);
+    const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); // 0=Sun .. 6=Sat
+    if (dow !== 0 && dow !== 6) windowDates.add(d);
+    cursor = new Date(cursor.getTime() - 24 * 60 * 60 * 1000);
+    safety++;
+  }
+  const todayNy = marketDateNY(now);
+
+  // (NY date + symbol) → opening/closing fill tallies.
+  const groups = new Map<string, { date: string; opens: number; closes: number }>();
+  for (const ord of orders) {
+    const status = String(ord.status ?? "").toLowerCase();
+    if (!FILLED_ORDER_STATUSES.has(status)) continue;
+    const isOption =
+      String(ord.class ?? "").toLowerCase() === "option" || !!ord.option_symbol;
+    if (!isOption) continue;
+    const sym = ord.option_symbol ?? ord.symbol;
+    if (!sym) continue;
+    const iso = ord.transaction_date ?? ord.create_date;
+    if (!iso) continue;
+    const ms = new Date(iso).getTime();
+    if (!Number.isFinite(ms)) continue;
+    const nyDate = marketDateNY(new Date(ms));
+    if (!windowDates.has(nyDate)) continue;
+    const side = String(ord.side ?? "").toLowerCase();
+    const opening = side.startsWith("buy");
+    const closing = side.startsWith("sell");
+    if (!opening && !closing) continue;
+    const key = `${nyDate}|${sym}`;
+    const g = groups.get(key) ?? { date: nyDate, opens: 0, closes: 0 };
+    if (opening) g.opens++;
+    if (closing) g.closes++;
+    groups.set(key, g);
+  }
+
+  let count = 0;
+  const dates = new Set<string>();
+  for (const g of groups.values()) {
+    let contrib = Math.min(g.opens, g.closes); // completed round trips
+    if (g.date === todayNy) {
+      contrib += Math.max(0, g.opens - g.closes); // today's still-open → will day-trade
+    }
+    if (contrib > 0) {
+      count += contrib;
+      dates.add(g.date);
+    }
+  }
+  return { count, dates: [...dates].sort() };
+}
+
+/**
+ * Fetch the rolling day-trade count from Tradier order history (read-only, never
+ * throws). Returns available=false on any error or missing credentials so the
+ * caller can fall back to a conservative local count rather than assuming zero.
+ */
+export async function fetchRecentDayTrades(
+  cfg: BotConfig,
+  now: Date = new Date(),
+  windowBusinessDays = 5,
+): Promise<DayTradeCount> {
+  if (!cfg.tradierToken || !cfg.accountId) {
+    return { available: false, count: 0, dates: [], reason: "credentials missing" };
+  }
+  const url = `${cfg.tradierBaseUrl}/v1/accounts/${cfg.accountId}/orders`;
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${cfg.tradierToken}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) {
+      return { available: false, count: 0, dates: [], reason: `Tradier orders HTTP ${response.status}` };
+    }
+    const data = (await response.json()) as any;
+    const o = data?.orders?.order;
+    if (o === undefined || o === null || data?.orders === "null") {
+      return { available: true, count: 0, dates: [], reason: null }; // account has no orders
+    }
+    const arr: TradierOrderLike[] = Array.isArray(o) ? o : [o];
+    const { count, dates } = countDayTrades(arr, now, windowBusinessDays);
+    return { available: true, count, dates, reason: null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.name : "request failed";
+    return { available: false, count: 0, dates: [], reason: `Tradier orders request failed (${msg})` };
+  }
+}

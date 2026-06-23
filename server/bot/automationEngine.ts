@@ -50,6 +50,7 @@ import {
   selectMarkFromQuote,
   waitForFill,
   cancelOrder,
+  fetchRecentDayTrades,
 } from "./tradierAdapter.js";
 import { canOpenPosition, evaluatePosition, sizePosition } from "./riskManager.js";
 import { fetchAccountSnapshot } from "./tradierAdapter.js";
@@ -313,25 +314,34 @@ async function entryTick(): Promise<void> {
     let tradesOpenedThisDay = loss.tradesOpened;
     let openCount = getOpenPositions().length;
 
-    // PDT GUARD: a margin account under $25k equity is limited to 3 day trades
-    // per 5 business days. The bot only sees today's count, so it blocks the
-    // 4th same-day round trip — conservative but prevents the most common
-    // violation. Cash accounts are exempt from PDT.
+    // PDT GUARD: a margin account under $25k equity may make at most 3 day trades
+    // per 5 ROLLING business days before being flagged a pattern day trader. The
+    // count is broker-authoritative — derived from Tradier order history — so it
+    // spans days and survives restarts/redeploys (Render's local .data/ is
+    // ephemeral and would reset the count). Block the entry that would be the 4th
+    // day trade in the rolling window. Cash accounts are exempt from PDT. If the
+    // broker history is unreachable, fall back to today's local open count rather
+    // than assuming zero (fail conservative).
     if (
       cfg.pdtGuardEnabled &&
       live &&
       accountType !== null &&
       accountType.toLowerCase().includes("margin") &&
       totalEquity !== null &&
-      totalEquity < 25_000 &&
-      tradesOpenedThisDay >= 3
+      totalEquity < 25_000
     ) {
-      logEvent(
-        "block",
-        `PDT guard: margin account equity $${totalEquity.toFixed(0)} < $25k and ${tradesOpenedThisDay} day trades already opened today — no further autonomous entries (set BOT_PDT_GUARD_ENABLED=false to override)`,
-        mode,
-      );
-      return;
+      const dt = await fetchRecentDayTrades(cfg, now);
+      const effective = dt.available ? dt.count : tradesOpenedThisDay;
+      if (effective >= 3) {
+        logEvent(
+          "block",
+          `PDT guard: sub-$25k margin (equity $${totalEquity.toFixed(0)}) with ${effective} day trade(s) in the last 5 business days` +
+            `${dt.available ? (dt.dates.length ? ` (${dt.dates.join(", ")})` : "") : " — broker history unavailable, using today's local count"}` +
+            ` — blocking to avoid a pattern-day-trader flag (set BOT_PDT_GUARD_ENABLED=false to override)`,
+          mode,
+        );
+        return;
+      }
     }
 
     for (const sig of actionable) {
