@@ -473,6 +473,9 @@ async function openOne(
       expiry: contract.expiry,
       contracts: filledContracts,
       entryPremium: fillPremium,
+      // Realizable sell-side price at entry so the hard stop is measured from the
+      // BID, not the cost basis (prevents the spread from pre-tripping the stop).
+      entryBid: typeof contract.bid === "number" && contract.bid > 0 ? contract.bid : undefined,
       stopFraction: cfg.stopLossFraction,
       takeProfitFraction: cfg.takeProfitFraction,
       trailStartFraction: cfg.trailStartFraction,

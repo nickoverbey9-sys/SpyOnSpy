@@ -308,6 +308,16 @@ export function openPaperPosition(params: {
   expiry: string;
   contracts: number;
   entryPremium: number;
+  /**
+   * Bid at entry — the realizable (sell-side) price the moment the position
+   * opened. The hard stop and peak track the BID (that is the side a long exits
+   * on and what resolveMark reads), so the stop is measured from the bid, NOT the
+   * ask/mid cost basis. Without this, a position entered across a wide spread
+   * showed an instant bid-drag that could trip the −stopFraction stop on tick one
+   * for a guaranteed loss with zero adverse move. Optional/back-compatible: when
+   * omitted the stop falls back to the entryPremium basis (legacy behavior).
+   */
+  entryBid?: number;
   stopFraction: number;
   takeProfitFraction?: number;
   trailStartFraction?: number;
@@ -327,6 +337,12 @@ export function openPaperPosition(params: {
   const breakevenArmFrac = params.breakevenArmFraction ?? 0.10;
   const profitLockArmFrac = params.profitLockArmFraction ?? 0.15;
   const profitLockProfitFrac = params.profitLockProfitFraction ?? 0.05;
+  // Reference for the HARD STOP and peak tracking: the entry bid (realizable
+  // sell side) when available, else the entry premium (legacy). The profit
+  // protections below (breakeven → cost, profit-lock → cost×(1+lock)) stay on the
+  // entryPremium COST BASIS so "breakeven"/"profit" mean profit on what was paid.
+  const stopRef =
+    params.entryBid !== undefined && params.entryBid > 0 ? params.entryBid : params.entryPremium;
   const pos: PaperPosition = {
     id,
     symbol: params.symbol,
@@ -337,12 +353,12 @@ export function openPaperPosition(params: {
     contracts: params.contracts,
     entryPremium: params.entryPremium,
     entryAt: new Date().toISOString(),
-    stopPrice: round(params.entryPremium * (1 - params.stopFraction)),
+    stopPrice: round(stopRef * (1 - params.stopFraction)),
     takeProfitPrice: round(params.entryPremium * (1 + tpFrac)),
     trailStartPrice: round(params.entryPremium * (1 + trailStartFrac)),
     trailGivebackFraction: trailGiveback,
     trailArmed: false,
-    peakPremium: params.entryPremium,
+    peakPremium: round(stopRef),
     breakevenArmPrice: breakevenArmFrac > 0 ? round(params.entryPremium * (1 + breakevenArmFrac)) : 0,
     breakevenArmed: false,
     profitLockArmPrice: profitLockArmFrac > 0 ? round(params.entryPremium * (1 + profitLockArmFrac)) : 0,

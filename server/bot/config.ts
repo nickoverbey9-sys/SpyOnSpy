@@ -637,9 +637,15 @@ export function getBotConfig(): BotConfig {
     // unsafe defaults for a small account. <= 0 still means UNLIMITED if an
     // operator explicitly sets it, but the DEFAULTS are now finite.
     maxOpenPositions: envInt("BOT_MAX_OPEN_POSITIONS", 2),
-    maxTradesPerDay: envInt("BOT_MAX_TRADES_PER_DAY", 50),
-    // Default lowered from $600 (≈45% of a $1.3k account) to $200 (≈15%).
-    maxDailyLoss: envFloat("BOT_MAX_DAILY_LOSS", 200),
+    // SMALL-ACCOUNT CONSISTENCY PATCH: 50 was internally dead — under PDT a
+    // sub-$25k margin account is capped at 3 day trades, so 50 could never be
+    // reached and implied "overtrade freely" while PDT said "3 max". 6 is a sane
+    // ceiling that doesn't fight the PDT guard.
+    maxTradesPerDay: envInt("BOT_MAX_TRADES_PER_DAY", 6),
+    // SMALL-ACCOUNT CONSISTENCY PATCH: $200 was ~50% of a $400 account in one
+    // day. Lowered to $100 (~25%) so the daily circuit-breaker is sized to the
+    // real account, not a $1.3k one.
+    maxDailyLoss: envFloat("BOT_MAX_DAILY_LOSS", 100),
     stopLossFraction: envFloat("BOT_STOP_LOSS_FRACTION", 0.20),
     trim1Fraction: envFloat("BOT_TRIM1_FRACTION", 0.30),
     trim2Fraction: envFloat("BOT_TRIM2_FRACTION", 0.60),
@@ -653,15 +659,26 @@ export function getBotConfig(): BotConfig {
     breakevenArmFraction: envFloat("BOT_BREAKEVEN_ARM_FRACTION", 0.10),
     profitLockArmFraction: envFloat("BOT_PROFIT_LOCK_ARM_FRACTION", 0.15),
     profitLockProfitFraction: envFloat("BOT_PROFIT_LOCK_PROFIT_FRACTION", 0.05),
-    maxLossPerTrade: envFloat("BOT_MAX_LOSS_PER_TRADE", 100),
+    // SMALL-ACCOUNT CONSISTENCY PATCH: $100 was 25% of a $400 account on ONE
+    // trade (50% across two concurrent positions). Lowered to $40 so a single
+    // stop-out risks ~10% of the account and two concurrent positions ~20%.
+    maxLossPerTrade: envFloat("BOT_MAX_LOSS_PER_TRADE", 40),
     enforceMaxLossPerTrade: envBool("BOT_ENFORCE_MAX_LOSS_PER_TRADE", true),
     entryFillTimeoutMs: envInt("BOT_ENTRY_FILL_TIMEOUT_MS", 20_000),
     exitFillTimeoutMs: envInt("BOT_EXIT_FILL_TIMEOUT_MS", 12_000),
     markFailureAlertCount: envInt("BOT_MARK_FAILURE_ALERT_COUNT", 8),
     pdtGuardEnabled: envBool("BOT_PDT_GUARD_ENABLED", true),
     accountStartBalance: envFloat("BOT_ACCOUNT_START_BALANCE", 1326.24),
-    minOptionPremium: envFloat("BOT_MIN_OPTION_PREMIUM", 0.15),
-    maxSpreadPct: envFloat("BOT_MAX_SPREAD_PCT", 0.30),
+    // CONTRADICTION FIX: a $0.15 floor sits inside the guaranteed-loss zone — one
+    // tick is ~7% and a near-max spread is ~27%, so the -stop lands at/below the
+    // entry bid. Raised to $0.30 so a tick and the spread are a smaller fraction.
+    minOptionPremium: envFloat("BOT_MIN_OPTION_PREMIUM", 0.30),
+    // CONTRADICTION FIX (the big one): the spread is measured at exit on the BID
+    // while entry is on the ask/mid, so an allowed 30% spread = a 15% instant
+    // bid-drag = the ENTIRE -15% stop budget → fresh positions could stop out on
+    // tick one. Tightened to 12% so the half-spread (~6%) can't pre-trip the stop.
+    // Pairs with the bid-referenced stop in paperState (defense in depth).
+    maxSpreadPct: envFloat("BOT_MAX_SPREAD_PCT", 0.12),
 
     flattenHourCT: envInt("BOT_FLATTEN_HOUR_CT", 14),
     flattenMinuteCT: envInt("BOT_FLATTEN_MINUTE_CT", 30),

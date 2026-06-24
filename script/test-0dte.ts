@@ -1333,7 +1333,7 @@ check("default getBotConfig() ships finite risk-hardened counts (2 / 50)", () =>
   // the unlimitedCfg tests above), but the shipped DEFAULTS are finite.
   const c = getBotConfig();
   assert.strictEqual(c.maxOpenPositions, 2, "maxOpenPositions default is 2 (finite)");
-  assert.strictEqual(c.maxTradesPerDay, 50, "maxTradesPerDay default is 50 (finite)");
+  assert.strictEqual(c.maxTradesPerDay, 6, "maxTradesPerDay default is 6 (PDT-consistent, finite)");
 });
 
 console.log("\nPreserved hard stops still block even when counts are unlimited:");
@@ -1518,15 +1518,18 @@ check("default trailStartFraction is 0.25 (+25% arm) and giveback 0.15 (noise-fl
   // 5% give-back fired on routine 0DTE quote jitter; widened to 15%.
   assert.strictEqual(c.trailGivebackFraction, 0.15);
 });
-check("default maxLossPerTrade is 100 and start balance 1326.24", () => {
+check("default maxLossPerTrade is 40 and start balance 1326.24", () => {
   const c = getBotConfig();
-  assert.strictEqual(c.maxLossPerTrade, 100);
+  assert.strictEqual(c.maxLossPerTrade, 40, "right-sized to ~10% of a small account");
   assert.strictEqual(c.accountStartBalance, 1326.24);
 });
-check("default contract-quality filters: minOptionPremium 0.15, maxSpreadPct 0.30", () => {
+check("default contract-quality filters: minOptionPremium 0.30, maxSpreadPct 0.12", () => {
   const c = getBotConfig();
-  assert.strictEqual(c.minOptionPremium, 0.15);
-  assert.strictEqual(c.maxSpreadPct, 0.30);
+  // maxSpreadPct must stay well under 2× stopLossFraction so the half-spread
+  // cannot consume the whole stop budget on entry (the instant-stop contradiction).
+  assert.strictEqual(c.minOptionPremium, 0.30);
+  assert.strictEqual(c.maxSpreadPct, 0.12);
+  assert.ok(c.maxSpreadPct < 2 * c.stopLossFraction, "spread ceiling must be < 2× the stop fraction");
 });
 
 // ── Contract sizing ladder ──────────────────────────────────────────────────────
@@ -1534,7 +1537,10 @@ check("default contract-quality filters: minOptionPremium 0.15, maxSpreadPct 0.3
 // (step down by risk cap / cash) are still exercised at preferred=4 via cfg4 so
 // the stepping logic stays covered independent of the shipped default.
 console.log("\nContract sizing ladder (default preferred=2, min=1; mechanics tested at 4):");
-const cfg4: BotConfig = { ...getBotConfig(), preferredContractsPerTrade: 4 };
+// Pins both the preferred size (4) AND the $100 per-trade cap so the laddering
+// MECHANICS stay covered independent of the shipped defaults (now preferred 2,
+// cap $40).
+const cfg4: BotConfig = { ...getBotConfig(), preferredContractsPerTrade: 4, maxLossPerTrade: 100 };
 check("defaults: preferred=2, min=1, no explicit cap", () => {
   const c = getBotConfig();
   assert.strictEqual(c.preferredContractsPerTrade, 2, "preferred default is 2");
@@ -1670,7 +1676,9 @@ check("explicit caps at or above preferred are safe (cap=4 honors preferred 4)",
 });
 check("larger preferred honored when cash allows it", () => {
   // preferred=5, premium 0.40 → cost $40/ctr; 5 ctr cost $200 ≤ cash → size 5.
-  const cfg5: BotConfig = { ...getBotConfig(), preferredContractsPerTrade: 5 };
+  // Based on cfg4 ($100 cap) so this exercises the CASH-bound path; the shipped
+  // $40 cap is deliberately not the constraint under test here.
+  const cfg5: BotConfig = { ...cfg4, preferredContractsPerTrade: 5 };
   const s = sizePosition(0.4, cfg5, 1326.24);
   assert.strictEqual(s.allowed, true, s.reason);
   assert.strictEqual(s.contracts, 5);
@@ -1681,7 +1689,7 @@ check("per-trade risk cap downsizes to 3 ctr when projected loss would exceed th
   // cap, so sizing steps down to 3 ctr ($90 ≤ cap) with ample cash ($1326).
   // Pinned to preferred=4 to exercise the downsizing ladder (the shipped default
   // is now 2, which would land on 2 here without the step-down under test).
-  const cfg: BotConfig = { ...getBotConfig(), preferredContractsPerTrade: 4 };
+  const cfg: BotConfig = { ...getBotConfig(), preferredContractsPerTrade: 4, maxLossPerTrade: 100 };
   const sizing = sizePosition(1.5, cfg, 1326.24);
   assert.strictEqual(sizing.allowed, true, sizing.reason);
   assert.strictEqual(sizing.contracts, 3, "downsized to 3 by the per-trade risk cap");
@@ -3386,6 +3394,53 @@ check("the full static placeholder set (all Medium) never triggers the blackout"
   ];
   assert.strictEqual(isNearHighImpactEvent(placeholders, getBotConfig(), NEWS_NOW), false,
     "no downgraded placeholder may pause autonomous entries");
+});
+
+// ── Bid-referenced hard stop (contradiction fix #3) ─────────────────────────────
+// The exit measures on the BID, but the stop used to be set off the ask/mid cost
+// basis — so a wide-spread entry showed an instant bid-drag that could trip the
+// −stopFraction stop on tick one. The hard stop and peak now reference the entry
+// BID; breakeven/profit-lock destinations stay on the cost basis (profit = profit
+// on what was paid). Back-compatible: no entryBid → legacy basis stop.
+console.log("\nBid-referenced hard stop (contradiction fix #3):");
+
+check("stop & peak reference the entry BID; profit-lock stays on cost basis", () => {
+  resetPaperState();
+  const p = openPaperPosition({
+    symbol: brokerOcc("Call", 600), side: "Call", strike: 600, expiry: TODAY,
+    contracts: 2, entryPremium: 1.0, entryBid: 0.8, stopFraction: 0.2,
+    breakevenArmFraction: 0.1, profitLockArmFraction: 0.15, profitLockProfitFraction: 0.05,
+  });
+  assert.ok(Math.abs(p.stopPrice - 0.64) < 1e-9, `stop = entryBid×0.80 = 0.64, got ${p.stopPrice}`);
+  assert.ok(Math.abs(p.peakPremium - 0.8) < 1e-9, "peak seeds to the entry bid");
+  assert.ok(Math.abs((p.profitLockStopPrice ?? 0) - 1.05) < 1e-9, "profit-lock stop = cost×1.05 (profit on what was paid)");
+  resetPaperState();
+});
+
+check("bid-referenced stop does NOT pre-trip on the spread at entry", () => {
+  resetPaperState();
+  const cfg = getBotConfig();
+  const p = openPaperPosition({
+    symbol: brokerOcc("Call", 600), side: "Call", strike: 600, expiry: TODAY,
+    contracts: 2, entryPremium: 1.0, entryBid: 0.8, stopFraction: 0.2,
+  });
+  // Mark == the entry bid (0.80): a fresh position with ZERO adverse move. The
+  // legacy basis stop (1.00×0.80 = 0.80) would fire here for a guaranteed loss.
+  assert.strictEqual(evaluatePosition(p, 0.8, cfg, NOW).kind, "hold", "must not stop at the entry bid");
+  // A genuine 20% drop FROM the bid (0.80×0.80 = 0.64) still stops, as intended.
+  assert.strictEqual(evaluatePosition(p, 0.63, cfg, NOW).kind, "stop", "real adverse move still stops");
+  resetPaperState();
+});
+
+check("legacy path (no entryBid) keeps the basis-referenced stop & peak", () => {
+  resetPaperState();
+  const p = openPaperPosition({
+    symbol: brokerOcc("Call", 600), side: "Call", strike: 600, expiry: TODAY,
+    contracts: 2, entryPremium: 1.0, stopFraction: 0.2,
+  });
+  assert.ok(Math.abs(p.stopPrice - 0.8) < 1e-9, "legacy stop = entryPremium×0.80");
+  assert.ok(Math.abs(p.peakPremium - 1.0) < 1e-9, "legacy peak seeds to entryPremium");
+  resetPaperState();
 });
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

@@ -549,6 +549,12 @@ async function run() {
         expiry: actionable.contract.expiry,
         contracts: sizing.contracts,
         entryPremium,
+        // Realizable bid at entry → bid-referenced hard stop (matches live), so
+        // the spread can't pre-trip the stop in the simulation either.
+        entryBid:
+          typeof actionable.contract.bid === "number" && actionable.contract.bid > 0
+            ? actionable.contract.bid
+            : undefined,
         stopFraction: cfg.stopLossFraction,
         takeProfitFraction: cfg.takeProfitFraction,
         trailStartFraction: cfg.trailStartFraction,
