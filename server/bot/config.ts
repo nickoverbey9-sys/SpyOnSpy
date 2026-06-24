@@ -637,11 +637,9 @@ export function getBotConfig(): BotConfig {
     // unsafe defaults for a small account. <= 0 still means UNLIMITED if an
     // operator explicitly sets it, but the DEFAULTS are now finite.
     maxOpenPositions: envInt("BOT_MAX_OPEN_POSITIONS", 2),
-    // SMALL-ACCOUNT CONSISTENCY PATCH: 50 was internally dead — under PDT a
-    // sub-$25k margin account is capped at 3 day trades, so 50 could never be
-    // reached and implied "overtrade freely" while PDT said "3 max". 6 is a sane
-    // ceiling that doesn't fight the PDT guard.
-    maxTradesPerDay: envInt("BOT_MAX_TRADES_PER_DAY", 6),
+    // PDT guard removed; pattern-day-trader compliance is now operator's
+    // responsibility. 12 is a reasonable daily ceiling for small-account strategy.
+    maxTradesPerDay: envInt("BOT_MAX_TRADES_PER_DAY", 12),
     // SMALL-ACCOUNT CONSISTENCY PATCH: $200 was ~50% of a $400 account in one
     // day. Lowered to $100 (~25%) so the daily circuit-breaker is sized to the
     // real account, not a $1.3k one.
