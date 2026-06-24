@@ -1333,7 +1333,7 @@ check("default getBotConfig() ships finite risk-hardened counts (2 / 50)", () =>
   // the unlimitedCfg tests above), but the shipped DEFAULTS are finite.
   const c = getBotConfig();
   assert.strictEqual(c.maxOpenPositions, 2, "maxOpenPositions default is 2 (finite)");
-  assert.strictEqual(c.maxTradesPerDay, 6, "maxTradesPerDay default is 6 (PDT-consistent, finite)");
+  assert.strictEqual(c.maxTradesPerDay, 24, "maxTradesPerDay default is 24 (PDT guard removed, finite)");
 });
 
 console.log("\nPreserved hard stops still block even when counts are unlimited:");
