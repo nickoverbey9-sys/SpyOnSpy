@@ -649,12 +649,17 @@ export function getBotConfig(): BotConfig {
     trim2Fraction: envFloat("BOT_TRIM2_FRACTION", 0.60),
 
     takeProfitFraction: envFloat("BOT_TAKE_PROFIT_FRACTION", 0.40),
-    trailStartFraction: envFloat("BOT_TRAIL_START_FRACTION", 0.25),
-    // NOISE-FLOOR PATCH: 5% give-back is inside routine 0DTE quote jitter
-    // (especially with spreads up to maxSpreadPct allowed), so the trail fired
-    // almost immediately after arming. Default widened to 15%.
-    trailGivebackFraction: envFloat("BOT_TRAIL_GIVEBACK_FRACTION", 0.15),
-    breakevenArmFraction: envFloat("BOT_BREAKEVEN_ARM_FRACTION", 0.10),
+    // THETA-DECAY PATCH: 0DTE options lose 1-5% daily from theta alone. A +25%
+    // spike often happens on momentum/gamma, not structural setup. Lowered to +18%
+    // to reduce false arms and timeout from natural premium decay.
+    trailStartFraction: envFloat("BOT_TRAIL_START_FRACTION", 0.18),
+    // NOISE-FLOOR PATCH (REVISED): 15% give-back was too tight for 0DTE theta bleed.
+    // At +18% arm, a position decays naturally back toward peak from time decay alone.
+    // Widened to 20% to distinguish theta-bleed exits from real reversals.
+    trailGivebackFraction: envFloat("BOT_TRAIL_GIVEBACK_FRACTION", 0.20),
+    // DEAD-ZONE PATCH: 0-10% window is wide for fast-moving 0DTE. Lowered to 7%
+    // to shrink the unprotected commitment zone and arm breakeven sooner.
+    breakevenArmFraction: envFloat("BOT_BREAKEVEN_ARM_FRACTION", 0.07),
     profitLockArmFraction: envFloat("BOT_PROFIT_LOCK_ARM_FRACTION", 0.15),
     profitLockProfitFraction: envFloat("BOT_PROFIT_LOCK_PROFIT_FRACTION", 0.05),
     // SMALL-ACCOUNT CONSISTENCY PATCH: $100 was 25% of a $400 account on ONE
@@ -674,9 +679,10 @@ export function getBotConfig(): BotConfig {
     // CONTRADICTION FIX (the big one): the spread is measured at exit on the BID
     // while entry is on the ask/mid, so an allowed 30% spread = a 15% instant
     // bid-drag = the ENTIRE -15% stop budget → fresh positions could stop out on
-    // tick one. Tightened to 12% so the half-spread (~6%) can't pre-trip the stop.
-    // Pairs with the bid-referenced stop in paperState (defense in depth).
-    maxSpreadPct: envFloat("BOT_MAX_SPREAD_PCT", 0.12),
+    // tick one. Tightened to 8% per trading logic review to remove bid-drag ambiguity
+    // and ensure stops have room to breathe. Pairs with the bid-referenced stop in
+    // paperState (defense in depth).
+    maxSpreadPct: envFloat("BOT_MAX_SPREAD_PCT", 0.08),
 
     flattenHourCT: envInt("BOT_FLATTEN_HOUR_CT", 14),
     flattenMinuteCT: envInt("BOT_FLATTEN_MINUTE_CT", 30),

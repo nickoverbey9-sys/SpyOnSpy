@@ -13,11 +13,12 @@
 import type { BotConfig } from "./config.js";
 import { isPastCutoff, entryTimeWindowBlock } from "./config.js";
 import type { PaperPosition } from "./paperState.js";
-import { closePaperPosition, getOpenPositions, updateTrail } from "./paperState.js";
+import { closePaperPosition, getOpenPositions, updateTrail, partialClosePaperPosition } from "./paperState.js";
 
 export type RiskAction =
   | { kind: "stop"; positionId: string; reason: string; closePremium: number }
   | { kind: "flatten"; positionId: string; reason: string; closePremium: number }
+  | { kind: "partial_exit"; positionId: string; reason: string; closePremium: number; contractsToClose: number }
   | { kind: "hold"; positionId: string; reason: string };
 
 /**
@@ -75,6 +76,24 @@ export function evaluatePosition(
       reason,
       closePremium: currentPremium,
     };
+  }
+
+  // ── Partial exit tier (multi-contract positions only) ──────────────────────
+  // When a multi-contract position reaches +35% profit, exit 1 contract to lock
+  // in gains and let remaining contracts run on the trail. This improves win rate
+  // by protecting partial profits if the move reverses before the full trail arms
+  // at +18%. Only triggers once per position.
+  if (pos.contracts > 1 && !pos.partialExitDone) {
+    const partialExitThreshold = pos.entryPremium * (1 + 0.35);
+    if (currentPremium >= partialExitThreshold) {
+      return {
+        kind: "partial_exit",
+        positionId: pos.id,
+        reason: `Partial exit: exiting 1 of ${pos.contracts} contracts at +35% profit (premium ${currentPremium.toFixed(2)}, entry ${pos.entryPremium.toFixed(2)}) to lock gains; remaining contracts run trail`,
+        closePremium: currentPremium,
+        contractsToClose: 1,
+      };
+    }
   }
 
   // ── Give-back trailing stop (full position, single OR multi contract) ──────
@@ -139,6 +158,23 @@ export function runRiskPass(
         note = applied
           ? `Closed: PnL $${closed?.pnl?.toFixed(2) ?? "?"}`
           : "Position not found or already closed";
+        break;
+      }
+      case "partial_exit": {
+        const partial = partialClosePaperPosition(
+          pos.id,
+          action.contractsToClose,
+          action.closePremium,
+          action.reason,
+        );
+        applied = !!partial;
+        if (applied && partial) {
+          partial.partialExitDone = true;
+          const pnlPerContract = (action.closePremium - pos.entryPremium) * 100;
+          note = `Partial exit: sold ${action.contractsToClose} contract at +${((action.closePremium / pos.entryPremium - 1) * 100).toFixed(1)}%, ${partial.contracts} remaining`;
+        } else {
+          note = "Partial exit failed or position not found";
+        }
         break;
       }
       case "hold":

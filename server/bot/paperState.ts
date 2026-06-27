@@ -96,6 +96,8 @@ export interface PaperPosition {
   profitLockArmed?: boolean;
   /** True when this position is managed as a single contract (qty < 2 at entry). */
   singleContract: boolean;
+  /** True when a partial exit (1 contract) has already been executed on this multi-contract position. */
+  partialExitDone?: boolean;
   /**
    * True when this position was ADOPTED from a live Tradier broker position
    * (e.g. after an app restart/redeploy lost local state) rather than opened by
@@ -365,6 +367,7 @@ export function openPaperPosition(params: {
     profitLockStopPrice: profitLockArmFrac > 0 ? round(params.entryPremium * (1 + profitLockProfitFrac)) : 0,
     profitLockArmed: false,
     singleContract,
+    partialExitDone: false,
     setupSource: classifySetupSource(params.setupTitle),
     status: "open",
   };
@@ -507,6 +510,7 @@ export function adoptBrokerPosition(params: {
     profitLockStopPrice,
     profitLockArmed,
     singleContract: params.contracts < 2,
+    partialExitDone: false,
     adoptedFromBroker: true,
     brokerDateAcquired: params.brokerDateAcquired ?? undefined,
     brokerKey: key,
@@ -604,6 +608,44 @@ export function closePaperPosition(
     premium: closePremium,
     at: pos.closeAt,
     reason: `${reason} (paper)`,
+    simulated: true,
+  };
+  state.fills.push(fill);
+  persistIfConfigured();
+  return pos;
+}
+
+/**
+ * Partially close a position by exiting a subset of its contracts.
+ * Reduces the contract count and records a fill. The position remains open
+ * with the remaining contracts, eligible for further exit actions (trail,
+ * hard stop, etc.). Returns the updated position, or null if not found.
+ */
+export function partialClosePaperPosition(
+  positionId: string,
+  contractsToClose: number,
+  closePremium: number,
+  reason: string,
+): PaperPosition | null {
+  const pos = state.positions.find((p) => p.id === positionId && p.status === "open");
+  if (!pos || contractsToClose <= 0 || contractsToClose > pos.contracts) return null;
+
+  const pnl = round((closePremium - pos.entryPremium) * contractsToClose * 100);
+  pos.contracts -= contractsToClose;
+
+  // Only track gross loss on the contracts being closed
+  if (pnl < 0) {
+    state.daily.grossLossToday = round(state.daily.grossLossToday + Math.abs(pnl));
+  }
+
+  const fill: PaperFill = {
+    id: `fill-${Date.now()}`,
+    positionId,
+    action: "sell-to-close",
+    contracts: contractsToClose,
+    premium: closePremium,
+    at: new Date().toISOString(),
+    reason: `${reason} (paper, partial)`,
     simulated: true,
   };
   state.fills.push(fill);
