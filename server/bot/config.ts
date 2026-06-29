@@ -661,7 +661,7 @@ export function getBotConfig(): BotConfig {
     // to shrink the unprotected commitment zone and arm breakeven sooner.
     breakevenArmFraction: envFloat("BOT_BREAKEVEN_ARM_FRACTION", 0.07),
     profitLockArmFraction: envFloat("BOT_PROFIT_LOCK_ARM_FRACTION", 0.15),
-    profitLockProfitFraction: envFloat("BOT_PROFIT_LOCK_PROFIT_FRACTION", 0.05),
+    profitLockProfitFraction: envFloat("BOT_PROFIT_LOCK_PROFIT_FRACTION", 0.10),
     // SMALL-ACCOUNT CONSISTENCY PATCH: $100 was 25% of a $400 account on ONE
     // trade (50% across two concurrent positions). Lowered to $40 so a single
     // stop-out risks ~10% of the account and two concurrent positions ~20%.
